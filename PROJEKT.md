@@ -166,8 +166,8 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [x] Darstellungsgröße 100–200 % (Schrift, Boxen, Symbole; gespeichert)
 - [x] Datenbank-Rahmen von Hand aufziehen
 - [x] Speichern/Laden (JSON), Neu einlesen ohne Layoutverlust
-- [ ] Passwörter über `keyring`
-- [ ] Drucken, PDF- und PNG-Export
+- [x] Passwörter über `keyring` (Verbindungsdialog, Profile ohne Passwort in der Datei)
+- [x] Drucken, PDF- und PNG-Export
 
 ### Version 2
 - [ ] PostgreSQL- und SQL-Server-Adapter, Schemas als innere Rechtecke

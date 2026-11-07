@@ -16,7 +16,7 @@ from html import escape
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QFont, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGraphicsObject,
     QGraphicsSceneHoverEvent,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from erd_editor.diagram.palette import ContainerColors
+from erd_editor.diagram.style import scene_font as _font
 from erd_editor.model import Database
 
 if TYPE_CHECKING:
@@ -52,11 +53,6 @@ _CURSORS = {
 }
 
 
-def _font(size: float, bold: bool = False) -> QFont:
-    f = QFont("Segoe UI")
-    f.setPointSizeF(size)
-    f.setBold(bold)
-    return f
 
 
 class ContainerItem(QGraphicsObject):

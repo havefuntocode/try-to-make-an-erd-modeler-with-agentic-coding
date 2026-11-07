@@ -10,11 +10,22 @@ from dataclasses import dataclass, field
 from PySide6.QtGui import QColor, QFont
 
 
-def _font(size: float, bold: bool = False) -> QFont:
+def scene_font(points: float, bold: bool = False) -> QFont:
+    """Schrift für die Szene in Pixeln statt Punkt.
+
+    Punktgrößen rechnet Qt mit der Auflösung des Ausgabegeräts um
+    (Bildschirm 96 dpi, PDF 300 dpi …); die Boxen sind aber in
+    Szeneneinheiten vermessen. Pixelgrößen skalieren dagegen genau wie
+    die Geometrie – Text passt so auf jedem Gerät in seine Box.
+    `points` ist die gewünschte Größe bei 100 % auf einem 96-dpi-Bildschirm.
+    """
     f = QFont("Segoe UI")
-    f.setPointSizeF(size)
+    f.setPixelSize(max(1, round(points * 96 / 72)))
     f.setBold(bold)
     return f
+
+
+_font = scene_font
 
 
 @dataclass

@@ -12,7 +12,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QLibraryInfo, QLocale, QTimer, QTranslator
+from PySide6.QtCore import QDate, QLibraryInfo, QLocale, QTimer, QTranslator
+from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,6 +28,8 @@ from PySide6.QtWidgets import (
 from erd_editor.adapters.base import AdapterError
 from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
+from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, export_png, print_scene
+from erd_editor.export.render import page_layout
 from erd_editor.model import ConnectionProfile, Database, Diagram, Dialect
 from erd_editor.persistence import credentials
 from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory
@@ -40,6 +43,20 @@ from erd_editor.persistence.document import (
 
 APP_NAME = "ER-Diagramm-Editor"
 DISPLAY_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
+
+PDF_PAGES = {
+    "A4 – Ausrichtung automatisch": PageSpec(PageFormat.A4, Orientation.AUTO),
+    "A4 quer": PageSpec(PageFormat.A4, Orientation.LANDSCAPE),
+    "A4 hoch": PageSpec(PageFormat.A4, Orientation.PORTRAIT),
+    "A3 – Ausrichtung automatisch": PageSpec(PageFormat.A3, Orientation.AUTO),
+    "A3 quer": PageSpec(PageFormat.A3, Orientation.LANDSCAPE),
+    "A3 hoch": PageSpec(PageFormat.A3, Orientation.PORTRAIT),
+}
+PNG_RESOLUTIONS = {
+    "Normal (1×, Bildschirm)": 1.0,
+    "Hoch (2×, empfohlen für Artikel)": 2.0,
+    "Sehr hoch (3×, für Druck und Bücher)": 3.0,
+}
 FILE_FILTER = f"ER-Diagramme (*{FILE_SUFFIX});;Alle Dateien (*)"
 USAGE_HINT = f"Datei → Datenbank einlesen … (Strg+D) oder Datei → Öffnen … (*{FILE_SUFFIX})"
 
@@ -105,6 +122,10 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         self.reload_action = self._action("&Neu einlesen", self.reload, QKeySequence("F5"))
         file_menu.addAction(self.reload_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self._action("&Drucken …", self.print_dialog, QKeySequence.StandardKey.Print))
+        file_menu.addAction(self._action("Als &PDF exportieren …", self.export_pdf_dialog, QKeySequence("Ctrl+Shift+P")))
+        file_menu.addAction(self._action("Als P&NG exportieren …", self.export_png_dialog, QKeySequence("Ctrl+Shift+E")))
         file_menu.addSeparator()
         file_menu.addAction(self._action("&Beenden", self.close, QKeySequence.StandardKey.Quit))
 
@@ -350,6 +371,69 @@ class MainWindow(QMainWindow):
         self.setWindowModified(False)
         self.statusBar().showMessage(f"Gespeichert: {path}")
         return True
+
+    # ------------------------------------------------------------------ Drucken und Export
+
+    def footer_text(self) -> str:
+        name = self.path.name if self.path else "Unbenanntes Diagramm"
+        return f"{name} · {QDate.currentDate().toString('dd.MM.yyyy')}"
+
+    def _has_content(self) -> bool:
+        if not self.scene.entities:
+            self.statusBar().showMessage("Nichts zu drucken oder exportieren – zuerst eine Datenbank einlesen")
+            return False
+        return True
+
+    def _export_path(self, suffix: str) -> Path:
+        """Vorschlag: Name der Diagrammdatei mit neuer Endung."""
+        if self.path:
+            return self.path.with_name(self.path.name.removesuffix(FILE_SUFFIX) + suffix)
+        return self._dialog_dir() / f"diagramm{suffix}"
+
+    def print_dialog(self) -> None:
+        if not self._has_content():
+            return
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setPageLayout(page_layout(self.scene, PageSpec()))
+        preview = QPrintPreviewDialog(printer, self)
+        preview.setWindowTitle("Druckvorschau")
+        preview.paintRequested.connect(lambda p: print_scene(self.scene, p, self.footer_text()))
+        preview.resize(1000, 750)
+        preview.exec()
+
+    def export_pdf_dialog(self) -> None:
+        if not self._has_content():
+            return
+        choice, ok = QInputDialog.getItem(self, "Als PDF exportieren", "Seitenformat:", list(PDF_PAGES), 0, False)
+        if not ok:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Als PDF exportieren", str(self._export_path(".pdf")), "PDF (*.pdf)")
+        if not path:
+            return
+        path = path if path.lower().endswith(".pdf") else path + ".pdf"
+        try:
+            export_pdf(self.scene, path, PDF_PAGES[choice], self.path.name if self.path else "", self.footer_text())
+        except OSError as exc:
+            QMessageBox.critical(self, "Export fehlgeschlagen", str(exc))
+            return
+        self.statusBar().showMessage(f"PDF gespeichert: {path}")
+
+    def export_png_dialog(self) -> None:
+        if not self._has_content():
+            return
+        choice, ok = QInputDialog.getItem(self, "Als PNG exportieren", "Auflösung:", list(PNG_RESOLUTIONS), 1, False)
+        if not ok:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Als PNG exportieren", str(self._export_path(".png")), "PNG-Bild (*.png)")
+        if not path:
+            return
+        path = path if path.lower().endswith(".png") else path + ".png"
+        try:
+            size = export_png(self.scene, path, PNG_RESOLUTIONS[choice])
+        except OSError as exc:
+            QMessageBox.critical(self, "Export fehlgeschlagen", str(exc))
+            return
+        self.statusBar().showMessage(f"PNG gespeichert ({size.width()} × {size.height()} Pixel): {path}")
 
     def _dialog_dir(self) -> Path:
         return self.path.parent if self.path else Path.cwd()
