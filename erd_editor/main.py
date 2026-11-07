@@ -1,19 +1,22 @@
 """Einstiegspunkt des ER-Diagramm-Editors.
 
-Vorläufiger Aufruf, bis es einen Verbindungsdialog gibt:
+Aufrufe (bis es einen Verbindungsdialog gibt):
 
     python -m erd_editor.main --mysql root@localhost erd_test_shop erd_test_stammdaten
+    python -m erd_editor.main mein_diagramm.erd.json
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QInputDialog,
     QLineEdit,
     QMainWindow,
@@ -25,10 +28,22 @@ from erd_editor.adapters.base import AdapterError
 from erd_editor.adapters.mysql import MySqlAdapter
 from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
-from erd_editor.model import ConnectionProfile, Diagram, Dialect
+from erd_editor.model import ConnectionProfile, Database, Diagram, Dialect
 from erd_editor.persistence import credentials
+from erd_editor.persistence.document import (
+    FILE_SUFFIX,
+    DiagramDocument,
+    DocumentError,
+    load_document,
+    save_document,
+)
 
-USAGE_HINT = "Aufruf: python -m erd_editor.main --mysql root@localhost erd_test_shop erd_test_stammdaten"
+APP_NAME = "ER-Diagramm-Editor"
+FILE_FILTER = f"ER-Diagramme (*{FILE_SUFFIX});;Alle Dateien (*)"
+USAGE_HINT = (
+    "Aufruf: python -m erd_editor.main --mysql root@localhost erd_test_shop erd_test_stammdaten"
+    f"  ·  oder Datei → Öffnen (*{FILE_SUFFIX})"
+)
 
 
 def parse_target(target: str) -> tuple[str, str, int | None]:
@@ -42,52 +57,122 @@ def parse_target(target: str) -> tuple[str, str, int | None]:
     return user, host, int(port) if port else None
 
 
+def with_suffix(path: str) -> Path:
+    """Dateiendung `.erd.json` ergänzen, falls sie fehlt."""
+    p = Path(path)
+    return p if p.name.endswith(FILE_SUFFIX) else p.with_name(p.name + FILE_SUFFIX)
+
+
+def describe_changes(old: Diagram, new: Diagram) -> str:
+    """Kurze Zusammenfassung für die Statuszeile nach dem Neu-Einlesen."""
+    old_refs = {ref for ref, _ in old.tables()}
+    new_refs = {ref for ref, _ in new.tables()}
+    added, removed = len(new_refs - old_refs), len(old_refs - new_refs)
+    if not added and not removed:
+        return "Neu eingelesen – keine neuen oder entfernten Tabellen"
+    return f"Neu eingelesen – {added} neu, {removed} entfernt"
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("ER-Diagramm-Editor")
         self.resize(1200, 800)
         self.scene = DiagramScene(self)
         self.view = DiagramView(self.scene, self)
         self.setCentralWidget(self.view)
+        self.document = DiagramDocument()
+        self.path: Path | None = None
+        self.scene.layout_changed.connect(lambda: self.setWindowModified(True))
         self._create_menus()
+        self._update_title()
         self.statusBar().showMessage(USAGE_HINT)
+
+    # ------------------------------------------------------------------ Menüs
+
+    def _action(self, text: str, slot, shortcut=None) -> QAction:
+        action = QAction(text, self)
+        if shortcut is not None:
+            action.setShortcuts(shortcut if isinstance(shortcut, list) else [shortcut])
+        action.triggered.connect(slot)
+        return action
 
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&Datei")
-        quit_action = QAction("&Beenden", self, shortcut=QKeySequence.StandardKey.Quit)
-        quit_action.triggered.connect(self.close)
-        file_menu.addAction(quit_action)
+        file_menu.addAction(self._action("Ö&ffnen …", self.open_dialog, QKeySequence.StandardKey.Open))
+        file_menu.addAction(self._action("&Speichern", self.save, QKeySequence.StandardKey.Save))
+        file_menu.addAction(self._action("Speichern &unter …", self.save_as, QKeySequence("Ctrl+Shift+S")))
+        file_menu.addSeparator()
+        self.reload_action = self._action("&Neu einlesen", self.reload, QKeySequence("F5"))
+        file_menu.addAction(self.reload_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self._action("&Beenden", self.close, QKeySequence.StandardKey.Quit))
 
         layout_menu = self.menuBar().addMenu("A&nordnen")
-        auto_action = QAction("&Automatisch anordnen", self, shortcut=QKeySequence("Ctrl+L"))
-        auto_action.triggered.connect(self._auto_layout)
-        layout_menu.addAction(auto_action)
+        layout_menu.addAction(self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L")))
 
         view_menu = self.menuBar().addMenu("&Ansicht")
-        for text, keys, slot in [
-            ("Vergrößern", [QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+=")], self.view.zoom_in),
-            ("Verkleinern", [QKeySequence.StandardKey.ZoomOut], self.view.zoom_out),
-            ("Ganzes Diagramm", [QKeySequence("Ctrl+0")], self.view.zoom_to_fit),
-            ("100 %", [QKeySequence("Ctrl+1")], lambda: self.view.set_zoom(1.0)),
-        ]:
-            action = QAction(text, self)
-            action.setShortcuts(keys)
-            action.triggered.connect(slot)
-            view_menu.addAction(action)
+        view_menu.addAction(self._action("Vergrößern", self.view.zoom_in, [QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+=")]))
+        view_menu.addAction(self._action("Verkleinern", self.view.zoom_out, QKeySequence.StandardKey.ZoomOut))
+        view_menu.addAction(self._action("Ganzes Diagramm", self.view.zoom_to_fit, QKeySequence("Ctrl+0")))
+        view_menu.addAction(self._action("100 %", lambda: self.view.set_zoom(1.0), QKeySequence("Ctrl+1")))
+
+    def _update_title(self) -> None:
+        name = self.path.name if self.path else "Unbenannt"
+        self.setWindowTitle(f"{name}[*] – {APP_NAME}")
 
     def _auto_layout(self) -> None:
         self.scene.auto_layout()
         self.view.zoom_to_fit()
 
-    def load_diagram(self, diagram: Diagram) -> None:
-        self.scene.load(diagram)
-        problems = diagram.validate()
-        msg = f"{len(self.scene.entities)} Tabellen aus {len(diagram.databases)} Datenbank(en) eingelesen"
+    # ------------------------------------------------------------------ Anzeigen
+
+    def show_document(self, document: DiagramDocument, use_layout: bool) -> None:
+        self.document = document
+        self.scene.load(document.diagram, document.layout if use_layout else None)
+        problems = document.diagram.validate()
+        msg = f"{len(self.scene.entities)} Tabellen aus {len(document.diagram.databases)} Datenbank(en)"
         if problems:
             msg += f" – {len(problems)} Hinweis(e), z. B.: {problems[0]}"
         self.statusBar().showMessage(msg)
         QTimer.singleShot(0, self.view.zoom_to_fit)
+
+    def load_diagram(self, diagram: Diagram) -> None:
+        """Diagramm ohne Datei anzeigen (automatisch angeordnet)."""
+        self.show_document(DiagramDocument(diagram), use_layout=False)
+
+    # ------------------------------------------------------------------ Datenbank
+
+    def _password_for(self, profile: ConnectionProfile) -> tuple[str | None, bool]:
+        """Passwort aus dem keyring oder per Dialog; zweiter Wert: neu eingegeben."""
+        password = credentials.get_password(profile)
+        if password is not None:
+            return password, False
+        password, ok = QInputDialog.getText(
+            self, "Passwort", f"Passwort für {profile.user}@{profile.host}:", QLineEdit.EchoMode.Password
+        )
+        return (password, True) if ok else (None, False)
+
+    def read_databases(self, profile: ConnectionProfile, names: list[str]) -> list[Database] | None:
+        """Datenbanken eines Profils einlesen; None bei Abbruch oder Fehler."""
+        if profile.dialect is not Dialect.MYSQL:
+            QMessageBox.critical(self, "Nicht unterstützt", f"Dialekt {profile.dialect.value} folgt in Version 2.")
+            return None
+        password, newly_entered = self._password_for(profile)
+        if password is None:
+            return None
+        try:
+            with MySqlAdapter(profile, password) as adapter:
+                databases = [adapter.read_database(name) for name in names]
+        except AdapterError as exc:
+            QMessageBox.critical(self, "Fehler beim Einlesen", str(exc))
+            return None
+        if newly_entered:
+            answer = QMessageBox.question(
+                self, "Passwort speichern?", "Passwort in der Windows-Anmeldeinformationsverwaltung speichern?"
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                credentials.set_password(profile, password)
+        return databases
 
     def load_mysql(self, target: str, databases: list[str]) -> None:
         try:
@@ -96,40 +181,117 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ungültige Verbindung", str(exc))
             return
         profile = ConnectionProfile(f"{user}@{host}", Dialect.MYSQL, host, port, user)
-
-        password = credentials.get_password(profile)
-        newly_entered = password is None
-        if password is None:
-            password, ok = QInputDialog.getText(
-                self, "Passwort", f"Passwort für {user}@{host}:", QLineEdit.EchoMode.Password
-            )
-            if not ok:
-                return
-
-        try:
-            with MySqlAdapter(profile, password) as adapter:
-                diagram = Diagram([adapter.read_database(name) for name in databases])
-        except AdapterError as exc:
-            QMessageBox.critical(self, "Fehler beim Einlesen", str(exc))
+        read = self.read_databases(profile, databases)
+        if read is None:
             return
+        self.path = None
+        self.show_document(DiagramDocument(Diagram(read), connections=[profile]), use_layout=False)
+        self._update_title()
+        self.setWindowModified(True)
 
-        if newly_entered:
-            answer = QMessageBox.question(
-                self,
-                "Passwort speichern?",
-                "Passwort in der Windows-Anmeldeinformationsverwaltung speichern?",
-            )
-            if answer == QMessageBox.StandardButton.Yes:
-                credentials.set_password(profile, password)
+    def reload(self) -> None:
+        """Alle Datenbanken neu einlesen; Positionen bleiben erhalten."""
+        old = self.document.diagram
+        if not old.databases:
+            self.statusBar().showMessage("Nichts zum Neu-Einlesen – zuerst eine Datenbank einlesen oder öffnen")
+            return
+        by_profile: dict[str, list[str]] = {}
+        for db in old.databases:
+            if db.connection_profile and self.document.connection(db.connection_profile):
+                by_profile.setdefault(db.connection_profile, []).append(db.name)
 
-        self.load_diagram(diagram)
+        fresh: dict[str, Database] = {}
+        for profile_name, names in by_profile.items():
+            read = self.read_databases(self.document.connection(profile_name), names)
+            if read is None:
+                return  # Abbruch oder Fehler: alles bleibt wie es war
+            fresh.update({db.name: db for db in read})
+
+        # Reihenfolge beibehalten; Datenbanken ohne Profil bleiben unverändert
+        new_diagram = Diagram([fresh.get(db.name, db) for db in old.databases])
+        layout = self.scene.current_layout()
+        self.document = DiagramDocument(new_diagram, layout, self.document.connections)
+        self.scene.load(new_diagram, layout)
+        self.statusBar().showMessage(describe_changes(old, new_diagram))
+        self.setWindowModified(True)
+
+    # ------------------------------------------------------------------ Datei
+
+    def open_dialog(self) -> None:
+        if not self._confirm_discard():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Diagramm öffnen", str(self._dialog_dir()), FILE_FILTER)
+        if path:
+            self.open_file(path)
+
+    def open_file(self, path: str | Path) -> bool:
+        try:
+            document = load_document(path)
+        except (OSError, DocumentError) as exc:
+            QMessageBox.critical(self, "Öffnen fehlgeschlagen", f"{path}\n\n{exc}")
+            return False
+        self.path = Path(path)
+        self.show_document(document, use_layout=True)
+        self._update_title()
+        self.setWindowModified(False)
+        return True
+
+    def save(self) -> bool:
+        if self.path is None:
+            return self.save_as()
+        return self._write(self.path)
+
+    def save_as(self) -> bool:
+        suggestion = self.path or self._dialog_dir() / f"diagramm{FILE_SUFFIX}"
+        path, _ = QFileDialog.getSaveFileName(self, "Diagramm speichern", str(suggestion), FILE_FILTER)
+        if not path:
+            return False
+        return self._write(with_suffix(path))
+
+    def _write(self, path: Path) -> bool:
+        self.document.layout = self.scene.current_layout()
+        try:
+            save_document(self.document, path)
+        except OSError as exc:
+            QMessageBox.critical(self, "Speichern fehlgeschlagen", f"{path}\n\n{exc}")
+            return False
+        self.path = path
+        self._update_title()
+        self.setWindowModified(False)
+        self.statusBar().showMessage(f"Gespeichert: {path}")
+        return True
+
+    def _dialog_dir(self) -> Path:
+        return self.path.parent if self.path else Path.cwd()
+
+    def _confirm_discard(self) -> bool:
+        """Bei ungespeicherten Änderungen nachfragen; True = weitermachen."""
+        if not self.isWindowModified():
+            return True
+        buttons = QMessageBox.StandardButton
+        answer = QMessageBox.question(
+            self,
+            "Ungespeicherte Änderungen",
+            "Das Diagramm wurde geändert. Änderungen speichern?",
+            buttons.Save | buttons.Discard | buttons.Cancel,
+        )
+        if answer == buttons.Save:
+            return self.save()
+        return answer == buttons.Discard
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._confirm_discard():
+            event.accept()
+        else:
+            event.ignore()
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv if argv is None else argv
     parser = argparse.ArgumentParser(prog="erd_editor")
     parser.add_argument("--mysql", metavar="USER@HOST[:PORT]", help="MySQL-Server, von dem gelesen wird")
-    parser.add_argument("databases", nargs="*", help="einzulesende Datenbanken")
+    parser.add_argument("items", nargs="*", metavar="DATENBANK|DATEI",
+                        help="mit --mysql: einzulesende Datenbanken, sonst eine Diagrammdatei")
     args = parser.parse_args(argv[1:])
 
     app = QApplication(argv)
@@ -141,10 +303,12 @@ def main(argv: list[str] | None = None) -> int:
     window = MainWindow()
     window.show()
     if args.mysql:
-        if not args.databases:
+        if not args.items:
             QMessageBox.critical(window, "Keine Datenbank", "Bitte mindestens eine Datenbank angeben.\n" + USAGE_HINT)
         else:
-            window.load_mysql(args.mysql, args.databases)
+            window.load_mysql(args.mysql, args.items)
+    elif args.items:
+        window.open_file(args.items[0])
     return app.exec()
 
 

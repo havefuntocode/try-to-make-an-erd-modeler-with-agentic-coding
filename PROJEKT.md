@@ -163,15 +163,15 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [x] Sonderfälle (Selbstreferenz, mehrspaltige FKs, Mehrfach-FKs)
 - [x] Auto-Layout
 - [x] Verschieben, Zoom
-- [ ] Speichern/Laden (JSON), Neu einlesen ohne Layoutverlust
+- [x] Speichern/Laden (JSON), Neu einlesen ohne Layoutverlust
 - [ ] Passwörter über `keyring`
-- [ ] Drucken und PDF-Export
+- [ ] Drucken, PDF- und PNG-Export
 
 ### Version 2
 - [ ] PostgreSQL- und SQL-Server-Adapter, Schemas als innere Rechtecke
 - [ ] Darstellungsoptionen: Datentypen ein/aus, nur Schlüsselspalten, Kommentare
 - [ ] Mehrere Teildiagramme pro Datenbank (z. B. „Bestellwesen“, „Personal“)
-- [ ] Export PNG/SVG
+- [ ] Export SVG (PNG ist in Version 1 vorgezogen)
 - [ ] Undo/Redo (`QUndoStack`)
 - [ ] Manuelle Überschreibungen (schwache Entität, Mindestkardinalität)
 - [ ] Weitere Notationen (UML, (min,max), IDEF1X)

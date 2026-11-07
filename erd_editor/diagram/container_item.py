@@ -43,10 +43,11 @@ class ContainerItem(QGraphicsObject):
     RADIUS = 10.0
     BORDER_WIDTH = 1.6
 
-    def __init__(self, database: Database, colors: ContainerColors) -> None:
+    def __init__(self, database: Database, colors: ContainerColors, color_index: int = 0) -> None:
         super().__init__()
         self.database = database
         self.colors = colors
+        self.color_index = color_index  # Palettenindex, wird im Layout gespeichert
         self.members: list[EntityItem] = []
         self.title_font = _font(11, bold=True)
         self.info_font = _font(8.5)
