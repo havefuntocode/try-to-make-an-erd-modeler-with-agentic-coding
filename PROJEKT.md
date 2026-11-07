@@ -155,7 +155,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 ## 10. Umfang
 
 ### Version 1
-- [ ] Neutrales Datenmodell
+- [x] Neutrales Datenmodell
 - [ ] MySQL-Adapter (Tabellen, Spalten, PK, FK, Indexe, Kommentare)
 - [ ] Entitätsboxen mit Icons und Indexbereich
 - [ ] Datenbank-Behälter, mehrere Datenbanken mit eigenen Farben
@@ -203,5 +203,5 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 ## 12. Offene Punkte
 
 - Endgültiger Projektname
-- Sprache der Oberfläche (Deutsch, später mehrsprachig?) und der Code-Bezeichner
+- Sprache der Oberfläche (Deutsch, später mehrsprachig?) – Code-Bezeichner: Englisch, Kommentare: Deutsch (entschieden)
 - Lizenz für die Veröffentlichung auf GitHub
