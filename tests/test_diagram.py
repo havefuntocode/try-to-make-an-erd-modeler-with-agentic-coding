@@ -149,7 +149,8 @@ class TestScene:
         scene = DiagramScene()
         scene.load(test_schema)
         scene.load(test_schema)
-        assert len(scene.items()) == 10
+        assert len(scene.items()) == 10 + 11  # Boxen + Linien
+        assert len(scene.relations) == 11
 
 
 def test_view_zoom_limits(qapp):

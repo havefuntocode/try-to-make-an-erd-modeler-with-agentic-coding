@@ -198,6 +198,10 @@ class EntityItem(QGraphicsObject):
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             self.setZValue(1 if value else 0)  # ausgewählte Box nach vorn
+        elif change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            scene = self.scene()
+            if scene is not None and hasattr(scene, "entity_moved"):
+                scene.entity_moved(self)  # Linien nachführen
         return super().itemChange(change, value)
 
     def tooltip_at(self, pos: QPointF) -> str:
