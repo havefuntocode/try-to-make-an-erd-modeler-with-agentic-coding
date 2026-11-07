@@ -174,14 +174,32 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [ ] Darstellungsoptionen: Datentypen ein/aus, nur Schlüsselspalten, Kommentare
 - [ ] Mehrere Teildiagramme pro Datenbank (z. B. „Bestellwesen“, „Personal“)
 - [ ] Export SVG (PNG ist in Version 1 vorgezogen)
-- [ ] Undo/Redo (`QUndoStack`)
+- [ ] Undo/Redo (`QUndoStack`) – zunächst für Layout-Aktionen, Fundament für Version 3
 - [ ] Manuelle Überschreibungen (schwache Entität, Mindestkardinalität)
 - [ ] Weitere Notationen (UML, (min,max), IDEF1X)
 
+### Version 3 – Modellieren
+Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
+
+- [ ] Datei → Neu; „Neue Datenbank (ohne Verbindung)“ mit Dialektwahl
+- [ ] Modellierte und eingelesene Datenbanken unterscheiden: eingelesene bleiben
+      schreibgeschützt, „Als Modell übernehmen“ erzeugt eine bearbeitbare Kopie
+- [ ] Entität anlegen/bearbeiten (Doppelklick): Name, Kommentar, Spalten
+      (Name, Typ, NULL, Default, PK, Auto-Increment), Indexe
+- [ ] Datentyp-Auswahl je Dialekt (nativ, ohne Mapping)
+- [ ] Beziehungs-Werkzeug: vom Kind zum Elternteil ziehen, 1:n/1:1 und
+      identifizierend/nicht-identifizierend wählen; FK-Spalten werden automatisch
+      angelegt (Typ vom PK, bei identifizierend in den PK, bei 1:1 UNIQUE)
+- [ ] Löschen und Umbenennen mit allen Folgen (abhängige FKs)
+- [ ] Alle Bearbeitungen über Undo/Redo
+- [ ] Szene gezielt aktualisieren statt komplett neu aufbauen
+- [ ] SQL-Export (`CREATE TABLE …`) für MySQL
+
 ### Später
 - [ ] Views als eigene Objektart
-- [ ] Bearbeiten der Struktur im Editor
+- [ ] Modell mit Datenbank abgleichen (Unterschiede als `ALTER TABLE`)
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
+- [ ] Mehrseitiger Druck (Poster) für große Diagramme
 - [ ] n:m-Zwischentabellen optional als eine Linie
 - [ ] Chen-Ansicht
 - [ ] Optional: Modell über einen MCP-Server bereitstellen
