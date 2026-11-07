@@ -161,7 +161,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [ ] Datenbank-Behälter, mehrere Datenbanken mit eigenen Farben
 - [x] Beziehungen: Krähenfuß, identifizierend/nicht-identifizierend, abgeleitete Kardinalitäten
 - [x] Sonderfälle (Selbstreferenz, mehrspaltige FKs, Mehrfach-FKs)
-- [ ] Auto-Layout
+- [x] Auto-Layout
 - [x] Verschieben, Zoom
 - [ ] Speichern/Laden (JSON), Neu einlesen ohne Layoutverlust
 - [ ] Passwörter über `keyring`

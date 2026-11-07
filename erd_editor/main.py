@@ -59,6 +59,11 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        layout_menu = self.menuBar().addMenu("A&nordnen")
+        auto_action = QAction("&Automatisch anordnen", self, shortcut=QKeySequence("Ctrl+L"))
+        auto_action.triggered.connect(self._auto_layout)
+        layout_menu.addAction(auto_action)
+
         view_menu = self.menuBar().addMenu("&Ansicht")
         for text, keys, slot in [
             ("Vergrößern", [QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+=")], self.view.zoom_in),
@@ -70,6 +75,10 @@ class MainWindow(QMainWindow):
             action.setShortcuts(keys)
             action.triggered.connect(slot)
             view_menu.addAction(action)
+
+    def _auto_layout(self) -> None:
+        self.scene.auto_layout()
+        self.view.zoom_to_fit()
 
     def load_diagram(self, diagram: Diagram) -> None:
         self.scene.load(diagram)

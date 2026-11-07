@@ -87,3 +87,87 @@ def place(desired: list[float], fixed: list[float], low: float, high: float, spa
         result[i] = chosen
         taken.append(chosen)
     return [r for r in result if r is not None]
+
+
+# ---------------------------------------------------------------------- Hindernisse
+
+
+def _segment_hits(a: QPointF, b: QPointF, obstacles: list[QRectF], clearance: float) -> bool:
+    """True, wenn das waagerechte/senkrechte Segment a–b eine Box schneidet."""
+    seg = QRectF(a, b).normalized().adjusted(-0.5, -0.5, 0.5, 0.5)
+    return any(seg.intersects(r.adjusted(-clearance, -clearance, clearance, clearance)) for r in obstacles)
+
+
+def path_hits(points: list[QPointF], obstacles: list[QRectF], clearance: float = 2.0) -> bool:
+    return any(_segment_hits(a, b, obstacles, clearance) for a, b in zip(points, points[1:]))
+
+
+def route_avoiding(
+    start: QPointF,
+    start_side: Side,
+    end: QPointF,
+    end_side: Side,
+    stub: float,
+    offset: float,
+    obstacles: list[QRectF],
+    channel_gap: float = 14.0,
+) -> list[QPointF]:
+    """Wie `route`, weicht aber anderen Boxen aus (soweit einfach möglich).
+
+    1. Einfache Linie wie `route`.
+    2. Z-Linie mit dem senkrechten Stück direkt neben Kind oder Elternteil.
+    3. Linie mit Kanal: neben dem Kind senkrecht zu einer freien Höhe,
+       waagerecht durch die Lücke zwischen den Boxen, neben dem Elternteil
+       wieder senkrecht zum Andockpunkt.
+    Findet sich kein freier Weg, bleibt es bei der einfachen Linie.
+    """
+    simple = route(start, start_side, end, end_side, stub, offset)
+    if not obstacles or not path_hits(simple, obstacles):
+        return simple
+
+    x1 = start.x() + start_side.value * (stub + abs(offset))
+    x2 = end.x() + end_side.value * (stub + abs(offset))
+
+    if start_side is not end_side:
+        for mid_x in (x1, x2):
+            candidate = [start, QPointF(mid_x, start.y()), QPointF(mid_x, end.y()), end]
+            if not path_hits(candidate, obstacles):
+                return candidate
+
+    # Kanal suchen: freie Höhen ober- und unterhalb der Boxen im Weg
+    lo_x, hi_x = min(x1, x2), max(x1, x2)
+    in_range = [r for r in obstacles if r.right() >= lo_x and r.left() <= hi_x]
+    candidates = {start.y(), end.y()}
+    for r in in_range:
+        candidates.add(r.top() - channel_gap + offset / 2)
+        candidates.add(r.bottom() + channel_gap + offset / 2)
+    target = (start.y() + end.y()) / 2
+    for y in sorted(candidates, key=lambda c: abs(c - target)):
+        candidate = [
+            start,
+            QPointF(x1, start.y()),
+            QPointF(x1, y),
+            QPointF(x2, y),
+            QPointF(x2, end.y()),
+            end,
+        ]
+        if not path_hits(candidate, obstacles):
+            return _drop_redundant(candidate)
+    return simple
+
+
+def _drop_redundant(points: list[QPointF]) -> list[QPointF]:
+    """Doppelte Punkte und Punkte auf einer Geraden entfernen."""
+    result: list[QPointF] = []
+    for p in points:
+        if result and abs(result[-1].x() - p.x()) < 1e-6 and abs(result[-1].y() - p.y()) < 1e-6:
+            continue
+        if len(result) >= 2:
+            a, b = result[-2], result[-1]
+            if (abs(a.x() - b.x()) < 1e-6 and abs(b.x() - p.x()) < 1e-6) or (
+                abs(a.y() - b.y()) < 1e-6 and abs(b.y() - p.y()) < 1e-6
+            ):
+                result[-1] = p
+                continue
+        result.append(p)
+    return result

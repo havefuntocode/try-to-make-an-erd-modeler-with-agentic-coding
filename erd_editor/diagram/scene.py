@@ -11,23 +11,16 @@ from PySide6.QtWidgets import QGraphicsScene
 from erd_editor.analysis import ZERO_OR_MANY, derive_relationships
 from erd_editor.diagram.entity_item import EntityItem
 from erd_editor.diagram.relation_item import RelationItem
-from erd_editor.diagram.routing import Side, choose_sides, place, route
+from erd_editor.diagram.routing import Side, choose_sides, place, route_avoiding
 from erd_editor.diagram.style import EntityStyle
+from erd_editor.layout import LayoutNode, layered_layout
 from erd_editor.model import Diagram, TableRef
 from erd_editor.notation import CrowsFootNotation, Notation
 
 
 class DiagramScene(QGraphicsScene):
-    """Szene mit einer Entitätsbox pro Tabelle und einer Linie pro Beziehung.
+    """Szene mit einer Entitätsbox pro Tabelle und einer Linie pro Beziehung."""
 
-    Die Anordnung ist vorläufig ein einfaches Raster; das Auto-Layout
-    (`erd_editor.layout`) ersetzt sie in einem späteren Schritt.
-    """
-
-    GRID_COLUMNS = 4
-    SPACING_X = 90.0
-    SPACING_Y = 50.0
-    DATABASE_GAP = 100.0
     PARALLEL_OFFSET = 12.0
 
     def __init__(self, parent=None, notation: Notation | None = None) -> None:
@@ -37,6 +30,7 @@ class DiagramScene(QGraphicsScene):
         self.entities: dict[TableRef, EntityItem] = {}
         self.relations: list[RelationItem] = []
         self.diagram: Diagram | None = None
+        self._routing_suspended = False
         self.selectionChanged.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------ Aufbau
@@ -52,36 +46,33 @@ class DiagramScene(QGraphicsScene):
             item = EntityItem(ref, table, style)
             self.addItem(item)
             self.entities[ref] = item
-        self._arrange_grid()
-
         for rel in derive_relationships(diagram):
             item = RelationItem(rel, self.entities[rel.child], self.entities[rel.parent], self.notation)
             self.addItem(item)
             self.relations.append(item)
-        self.update_relations()
+        self.auto_layout()
 
-    def _arrange_grid(self) -> None:
-        """Pro Datenbank ein Raster, Datenbanken untereinander."""
-        y_db = 0.0
-        databases: dict[str, list[EntityItem]] = {}
-        for ref, item in self.entities.items():
-            databases.setdefault(ref.database, []).append(item)
-        for items in databases.values():
-            y_row = y_db
-            for start in range(0, len(items), self.GRID_COLUMNS):
-                row = items[start : start + self.GRID_COLUMNS]
-                x = 0.0
-                for item in row:
-                    item.setPos(x, y_row)
-                    x += item.rect.width() + self.SPACING_X
-                y_row += max(i.rect.height() for i in row) + self.SPACING_Y
-            y_db = y_row + self.DATABASE_GAP - self.SPACING_Y
+    def auto_layout(self) -> None:
+        """Alle Boxen automatisch anordnen (Schichten-Layout je Datenbank)."""
+        nodes = [
+            LayoutNode(ref, item.rect.width(), item.rect.height(), ref.database)
+            for ref, item in self.entities.items()
+        ]
+        edges = [(r.relationship.child, r.relationship.parent) for r in self.relations]
+        positions = layered_layout(nodes, edges)
+        self._routing_suspended = True
+        try:
+            for ref, (x, y) in positions.items():
+                self.entities[ref].setPos(x, y)
+        finally:
+            self._routing_suspended = False
+        self.update_relations()
 
     # ------------------------------------------------------------------ Linienführung
 
     def entity_moved(self, item: EntityItem) -> None:
         """Wird von EntityItem bei jeder Positionsänderung aufgerufen."""
-        if self.relations:
+        if self.relations and not self._routing_suspended:
             self.update_relations()
 
     def update_relations(self) -> None:
@@ -147,6 +138,7 @@ class DiagramScene(QGraphicsScene):
                 ends[i] = QPointF(key[1].x_of(p_rect), y)
 
         # Schritt 3
+        all_rects = {id(item): scene_rect(item) for item in self.entities.values()}
         for i, rel_item in enumerate(self.relations):
             rel = rel_item.relationship
             child_side, parent_side = sides[i]
@@ -154,7 +146,9 @@ class DiagramScene(QGraphicsScene):
                 offset = rel.parallel_index * self.PARALLEL_OFFSET
             else:
                 offset = (rel.parallel_index - (rel.parallel_count - 1) / 2) * self.PARALLEL_OFFSET
-            points = route(starts[i], child_side, ends[i], parent_side, stub, offset)
+            skip = {id(rel_item.child_item), id(rel_item.parent_item)}
+            obstacles = [r for key, r in all_rects.items() if key not in skip]
+            points = route_avoiding(starts[i], child_side, ends[i], parent_side, stub, offset, obstacles)
             rel_item.set_route(points, child_side, parent_side)
 
     def _on_selection_changed(self) -> None:
