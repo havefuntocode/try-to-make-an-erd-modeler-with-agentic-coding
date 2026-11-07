@@ -158,7 +158,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [x] Neutrales Datenmodell
 - [x] MySQL-Adapter (Tabellen, Spalten, PK, FK, Indexe, Kommentare)
 - [x] Entitätsboxen mit Icons und Indexbereich
-- [ ] Datenbank-Behälter, mehrere Datenbanken mit eigenen Farben
+- [x] Datenbank-Behälter, mehrere Datenbanken mit eigenen Farben
 - [x] Beziehungen: Krähenfuß, identifizierend/nicht-identifizierend, abgeleitete Kardinalitäten
 - [x] Sonderfälle (Selbstreferenz, mehrspaltige FKs, Mehrfach-FKs)
 - [x] Auto-Layout

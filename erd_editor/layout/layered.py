@@ -36,7 +36,7 @@ class LayoutOptions:
     column_gap: float = 130.0  # waagerecht zwischen Spalten (Platz für Linien und Symbole)
     row_gap: float = 36.0  # senkrecht zwischen Boxen einer Spalte
     component_gap: float = 90.0  # zwischen unabhängigen Komponenten
-    group_gap: float = 140.0  # zwischen Gruppen (Datenbanken)
+    group_gap: float = 170.0  # zwischen Gruppen (Platz für die Behälter samt Kopfzeile)
     ordering_sweeps: int = 8
     alignment_rounds: int = 6
     isolated_columns: int = 4  # Mindestspaltenzahl im Raster für Tabellen ohne Beziehungen

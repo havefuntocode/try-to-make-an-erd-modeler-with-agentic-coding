@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QGraphicsScene
 
 from erd_editor.analysis import ZERO_OR_MANY, derive_relationships
+from erd_editor.diagram.container_item import ContainerItem
 from erd_editor.diagram.entity_item import EntityItem
+from erd_editor.diagram.palette import colors_for
 from erd_editor.diagram.relation_item import RelationItem
 from erd_editor.diagram.routing import Side, choose_sides, place, route_avoiding
 from erd_editor.diagram.style import EntityStyle
@@ -19,7 +22,7 @@ from erd_editor.notation import CrowsFootNotation, Notation
 
 
 class DiagramScene(QGraphicsScene):
-    """Szene mit einer Entitätsbox pro Tabelle und einer Linie pro Beziehung."""
+    """Szene mit einem Behälter pro Datenbank, einer Box pro Tabelle und einer Linie pro Beziehung."""
 
     PARALLEL_OFFSET = 12.0
 
@@ -29,6 +32,7 @@ class DiagramScene(QGraphicsScene):
         self.notation = notation or CrowsFootNotation()
         self.entities: dict[TableRef, EntityItem] = {}
         self.relations: list[RelationItem] = []
+        self.containers: dict[str, ContainerItem] = {}
         self.diagram: Diagram | None = None
         self._routing_suspended = False
         self.selectionChanged.connect(self._on_selection_changed)
@@ -39,13 +43,24 @@ class DiagramScene(QGraphicsScene):
         """Szene leeren und alle Tabellen und Beziehungen des Diagramms anlegen."""
         self.relations = []
         self.entities = {}
+        self.containers = {}
         self.clear()
         self.diagram = diagram
-        style = style or EntityStyle()
-        for ref, table in diagram.tables():
-            item = EntityItem(ref, table, style)
-            self.addItem(item)
-            self.entities[ref] = item
+        base_style = style or EntityStyle()
+        for index, database in enumerate(diagram.databases):
+            colors = colors_for(index)
+            container = ContainerItem(database, colors)
+            self.addItem(container)
+            self.containers[database.name] = container
+            # Entitäten übernehmen den Farbton ihrer Datenbank
+            db_style = replace(base_style, header=colors.qcolor("entity_header"), border=colors.qcolor("border"))
+            for schema in database.schemas:
+                for table in schema.tables:
+                    ref = TableRef(database.name, schema.name, table.name)
+                    item = EntityItem(ref, table, db_style)
+                    self.addItem(item)
+                    self.entities[ref] = item
+                    container.members.append(item)
         for rel in derive_relationships(diagram):
             item = RelationItem(rel, self.entities[rel.child], self.entities[rel.parent], self.notation)
             self.addItem(item)
@@ -66,13 +81,39 @@ class DiagramScene(QGraphicsScene):
                 self.entities[ref].setPos(x, y)
         finally:
             self._routing_suspended = False
+        self.update_containers()
+        self.update_relations()
+
+    # ------------------------------------------------------------------ Behälter
+
+    def container_of(self, item: EntityItem) -> ContainerItem | None:
+        return self.containers.get(item.ref.database)
+
+    def update_containers(self) -> None:
+        for container in self.containers.values():
+            container.update_geometry()
+
+    def move_container(self, container: ContainerItem, dx: float, dy: float) -> None:
+        """Behälter samt Entitäten verschieben; Linien nur einmal neu führen."""
+        self._routing_suspended = True
+        try:
+            for item in container.members:
+                item.moveBy(dx, dy)
+        finally:
+            self._routing_suspended = False
+        container.update_geometry()
         self.update_relations()
 
     # ------------------------------------------------------------------ Linienführung
 
     def entity_moved(self, item: EntityItem) -> None:
         """Wird von EntityItem bei jeder Positionsänderung aufgerufen."""
-        if self.relations and not self._routing_suspended:
+        if self._routing_suspended:
+            return
+        container = self.container_of(item)
+        if container is not None:
+            container.update_geometry()  # Rahmen wächst mit
+        if self.relations:
             self.update_relations()
 
     def update_relations(self) -> None:

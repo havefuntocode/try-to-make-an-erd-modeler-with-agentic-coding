@@ -149,7 +149,7 @@ class TestScene:
         scene = DiagramScene()
         scene.load(test_schema)
         scene.load(test_schema)
-        assert len(scene.items()) == 10 + 11  # Boxen + Linien
+        assert len(scene.items()) == 10 + 11 + 2  # Boxen + Linien + Behälter
         assert len(scene.relations) == 11
 
 
