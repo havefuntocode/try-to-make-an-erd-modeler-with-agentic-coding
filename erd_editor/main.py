@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QLibraryInfo, QLocale, QTimer, QTranslator
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -25,11 +25,11 @@ from PySide6.QtWidgets import (
 )
 
 from erd_editor.adapters.base import AdapterError
-from erd_editor.adapters.mysql import MySqlAdapter
 from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
 from erd_editor.model import ConnectionProfile, Database, Diagram, Dialect
 from erd_editor.persistence import credentials
+from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory
 from erd_editor.persistence.document import (
     FILE_SUFFIX,
     DiagramDocument,
@@ -41,10 +41,7 @@ from erd_editor.persistence.document import (
 APP_NAME = "ER-Diagramm-Editor"
 DISPLAY_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
 FILE_FILTER = f"ER-Diagramme (*{FILE_SUFFIX});;Alle Dateien (*)"
-USAGE_HINT = (
-    "Aufruf: python -m erd_editor.main --mysql root@localhost erd_test_shop erd_test_stammdaten"
-    f"  ·  oder Datei → Öffnen (*{FILE_SUFFIX})"
-)
+USAGE_HINT = f"Datei → Datenbank einlesen … (Strg+D) oder Datei → Öffnen … (*{FILE_SUFFIX})"
 
 
 def parse_target(target: str) -> tuple[str, str, int | None]:
@@ -82,6 +79,7 @@ class MainWindow(QMainWindow):
         self.view = DiagramView(self.scene, self)
         self.setCentralWidget(self.view)
         self.document = DiagramDocument()
+        self.adapter_factory = default_adapter_factory  # in Tests austauschbar
         self.path: Path | None = None
         self.scene.layout_changed.connect(lambda: self.setWindowModified(True))
         self._create_menus()
@@ -99,6 +97,8 @@ class MainWindow(QMainWindow):
 
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&Datei")
+        file_menu.addAction(self._action("&Datenbank einlesen …", self.open_connection_dialog, QKeySequence("Ctrl+D")))
+        file_menu.addSeparator()
         file_menu.addAction(self._action("Ö&ffnen …", self.open_dialog, QKeySequence.StandardKey.Open))
         file_menu.addAction(self._action("&Speichern", self.save, QKeySequence.StandardKey.Save))
         file_menu.addAction(self._action("Speichern &unter …", self.save_as, QKeySequence("Ctrl+Shift+S")))
@@ -193,27 +193,80 @@ class MainWindow(QMainWindow):
         )
         return (password, True) if ok else (None, False)
 
-    def read_databases(self, profile: ConnectionProfile, names: list[str]) -> list[Database] | None:
-        """Datenbanken eines Profils einlesen; None bei Abbruch oder Fehler."""
-        if profile.dialect is not Dialect.MYSQL:
-            QMessageBox.critical(self, "Nicht unterstützt", f"Dialekt {profile.dialect.value} folgt in Version 2.")
-            return None
-        password, newly_entered = self._password_for(profile)
+    def read_databases(
+        self,
+        profile: ConnectionProfile,
+        names: list[str],
+        password: str | None = None,
+        save_password: bool | None = None,
+    ) -> list[Database] | None:
+        """Datenbanken eines Profils einlesen; None bei Abbruch oder Fehler.
+
+        Ohne `password` wird es aus dem keyring geholt oder abgefragt.
+        `save_password=None` heißt: bei neu eingegebenem Passwort nachfragen.
+        """
+        newly_entered = False
         if password is None:
-            return None
+            password, newly_entered = self._password_for(profile)
+            if password is None:
+                return None
         try:
-            with MySqlAdapter(profile, password) as adapter:
+            with self.adapter_factory(profile, password) as adapter:
                 databases = [adapter.read_database(name) for name in names]
         except AdapterError as exc:
             QMessageBox.critical(self, "Fehler beim Einlesen", str(exc))
             return None
-        if newly_entered:
+        if save_password is None and newly_entered:
             answer = QMessageBox.question(
                 self, "Passwort speichern?", "Passwort in der Windows-Anmeldeinformationsverwaltung speichern?"
             )
-            if answer == QMessageBox.StandardButton.Yes:
-                credentials.set_password(profile, password)
+            save_password = answer == QMessageBox.StandardButton.Yes
+        if save_password:
+            credentials.set_password(profile, password)
         return databases
+
+    def open_connection_dialog(self) -> None:
+        """Datei → Datenbank einlesen …"""
+        has_diagram = bool(self.document.diagram.databases)
+        dialog = ConnectionDialog(
+            self.document.connections,
+            can_add=has_diagram,
+            adapter_factory=self.adapter_factory,
+            preselect=[db.name for db in self.document.diagram.databases],
+            parent=self,
+        )
+        if dialog.exec() != ConnectionDialog.DialogCode.Accepted:
+            return
+        choice = dialog.choice()
+        if not choice.add_to_diagram and not self._confirm_discard():
+            return
+        read = self.read_databases(choice.profile, choice.databases, choice.password, choice.save_password)
+        if read is not None:
+            self.add_databases(choice.profile, read, choice.add_to_diagram)
+
+    def add_databases(self, profile: ConnectionProfile, databases: list[Database], add_to_diagram: bool) -> None:
+        """Eingelesene Datenbanken anzeigen – neu oder zum Diagramm hinzu.
+
+        Beim Hinzufügen ersetzen gleichnamige Datenbanken die vorhandenen;
+        Positionen bekannter Tabellen bleiben erhalten.
+        """
+        if not add_to_diagram:
+            self.path = None
+            self.show_document(DiagramDocument(Diagram(databases), connections=[profile]), use_layout=False)
+            self._update_title()
+            self.setWindowModified(True)
+            return
+        old = self.document.diagram
+        fresh = {db.name: db for db in databases}
+        merged = [fresh.pop(db.name, db) for db in old.databases] + list(fresh.values())
+        connections = [c for c in self.document.connections if c.name != profile.name] + [profile]
+        new_diagram = Diagram(merged)
+        layout = self.scene.current_layout()
+        self.document = DiagramDocument(new_diagram, layout, connections)
+        self.scene.load(new_diagram, layout)
+        self.statusBar().showMessage(describe_changes(old, new_diagram))
+        self.setWindowModified(True)
+        QTimer.singleShot(0, self.view.zoom_to_fit)
 
     def load_mysql(self, target: str, databases: list[str]) -> None:
         try:
@@ -223,12 +276,8 @@ class MainWindow(QMainWindow):
             return
         profile = ConnectionProfile(f"{user}@{host}", Dialect.MYSQL, host, port, user)
         read = self.read_databases(profile, databases)
-        if read is None:
-            return
-        self.path = None
-        self.show_document(DiagramDocument(Diagram(read), connections=[profile]), use_layout=False)
-        self._update_title()
-        self.setWindowModified(True)
+        if read is not None:
+            self.add_databases(profile, read, add_to_diagram=False)
 
     def reload(self) -> None:
         """Alle Datenbanken neu einlesen; Positionen bleiben erhalten."""
@@ -336,6 +385,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv[1:])
 
     app = QApplication(argv)
+    # Qt-eigene Texte (Standardknöpfe, Dateidialog) auf Deutsch
+    translator = QTranslator(app)
+    if translator.load(QLocale(QLocale.Language.German), "qtbase", "_", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+        app.installTranslator(translator)
     if "windows11" in [k.lower() for k in QStyleFactory.keys()]:
         app.setStyle("windows11")
     else:
@@ -350,6 +403,8 @@ def main(argv: list[str] | None = None) -> int:
             window.load_mysql(args.mysql, args.items)
     elif args.items:
         window.open_file(args.items[0])
+    else:
+        QTimer.singleShot(0, window.open_connection_dialog)  # ohne Argumente gleich zum Einlesen
     return app.exec()
 
 
