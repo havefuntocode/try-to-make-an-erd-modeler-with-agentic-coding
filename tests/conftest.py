@@ -1,8 +1,16 @@
 """Gemeinsame Fixtures: das Testschema aus PROJEKT.md, Abschnitt 11, als neutrales Modell."""
 
-import pytest
+import os
 
-from erd_editor.model import (
+# Qt-Tests ohne sichtbares Fenster; muss vor dem ersten Qt-Import gesetzt sein
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# offscreen findet die Systemschriften sonst nicht (realistische Textbreiten)
+if os.name == "nt":
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", "C:/Windows"), "Fonts"))
+
+import pytest  # noqa: E402
+
+from erd_editor.model import (  # noqa: E402
     Column,
     Database,
     Diagram,
@@ -154,3 +162,11 @@ def test_schema() -> Diagram:
 def schema_builder():
     """Liefert build_test_schema, damit Tests eigene Datenbanknamen wählen können."""
     return build_test_schema
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Eine QApplication für alle Qt-Tests."""
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
