@@ -35,7 +35,8 @@ erd_editor/
   notation/       # base.py, crowsfoot.py
   layout/         # Auto-Layout
   persistence/    # Laden/Speichern (JSON)
-  export/         # Drucken, PDF
+  export/         # Drucken, PDF, PNG
+  ui/             # Dialoge (Verbindung …)
   resources/icons # SVG-Icons
 tests/
   schema/         # Testschema für alle drei Dialekte
