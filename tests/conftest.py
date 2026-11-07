@@ -28,8 +28,16 @@ def col(name: str, data_type: str = "int", nullable: bool = False) -> Column:
     return Column(name, data_type, nullable=nullable)
 
 
-def build_test_schema() -> Diagram:
-    """Testschema mit allen Sonderfällen (MySQL, zwei Datenbanken)."""
+def build_test_schema(shop_db: str = "shop", master_db: str = "stammdaten") -> Diagram:
+    """Testschema mit allen Sonderfällen (MySQL, zwei Datenbanken).
+
+    Die Datenbanknamen sind wählbar, damit der Live-Test gegen
+    `erd_test_shop`/`erd_test_stammdaten` (tests/schema/mysql.sql) vergleichen kann.
+    """
+
+    def ref(table: str) -> TableRef:
+        return TableRef(shop_db, None, table)
+
     land = Table("land", [col("code", "char(2)"), col("name", "varchar(80)")], [pk("code")])
 
     kunde = Table(
@@ -37,7 +45,7 @@ def build_test_schema() -> Diagram:
         [col("id"), col("name", "varchar(100)"), col("land_code", "char(2)", nullable=True)],
         [pk("id"), Index("ft_name", IndexKind.FULLTEXT, ("name",))],
         # NULL-fähiger, datenbankübergreifender FK
-        [ForeignKey("fk_kunde_land", ("land_code",), TableRef("stammdaten", None, "land"), ("code",))],
+        [ForeignKey("fk_kunde_land", ("land_code",), TableRef(master_db, None, "land"), ("code",))],
         comment="Kundenstamm",
     )
     # 1:1 über UNIQUE-FK
@@ -45,14 +53,14 @@ def build_test_schema() -> Diagram:
         "kundenprofil",
         [col("id"), col("kunde_id"), col("bio", "text", nullable=True)],
         [pk("id"), Index("uq_kunde", IndexKind.UNIQUE, ("kunde_id",))],
-        [ForeignKey("fk_profil_kunde", ("kunde_id",), shop("kunde"), ("id",))],
+        [ForeignKey("fk_profil_kunde", ("kunde_id",), ref("kunde"), ("id",))],
     )
     # Ziel eines mehrspaltigen FK
     adresse = Table(
         "adresse",
         [col("kunde_id"), col("nr", "smallint"), col("ort", "varchar(80)")],
         [pk("kunde_id", "nr")],
-        [ForeignKey("fk_adresse_kunde", ("kunde_id",), shop("kunde"), ("id",))],
+        [ForeignKey("fk_adresse_kunde", ("kunde_id",), ref("kunde"), ("id",))],
     )
     # NOT-NULL-FK, mehrspaltiger FK, zwei FKs auf dieselbe Tabelle
     bestellung = Table(
@@ -67,14 +75,14 @@ def build_test_schema() -> Diagram:
         ],
         [pk("id"), Index("ix_kunde", IndexKind.INDEX, ("kunde_id",))],
         [
-            ForeignKey("fk_bestellung_kunde", ("kunde_id",), shop("kunde"), ("id",)),
+            ForeignKey("fk_bestellung_kunde", ("kunde_id",), ref("kunde"), ("id",)),
             ForeignKey(
-                "fk_lieferadresse", ("liefer_kunde_id", "liefer_nr"), shop("adresse"), ("kunde_id", "nr")
+                "fk_lieferadresse", ("liefer_kunde_id", "liefer_nr"), ref("adresse"), ("kunde_id", "nr")
             ),
             ForeignKey(
                 "fk_rechnungsadresse",
                 ("rechnung_kunde_id", "rechnung_nr"),
-                shop("adresse"),
+                ref("adresse"),
                 ("kunde_id", "nr"),
             ),
         ],
@@ -86,8 +94,8 @@ def build_test_schema() -> Diagram:
         [col("bestellung_id"), col("pos", "smallint"), col("artikel_id"), col("menge")],
         [pk("bestellung_id", "pos")],
         [
-            ForeignKey("fk_pos_bestellung", ("bestellung_id",), shop("bestellung"), ("id",)),
-            ForeignKey("fk_pos_artikel", ("artikel_id",), shop("artikel"), ("id",)),
+            ForeignKey("fk_pos_bestellung", ("bestellung_id",), ref("bestellung"), ("id",)),
+            ForeignKey("fk_pos_artikel", ("artikel_id",), ref("artikel"), ("id",)),
         ],
     )
     kategorie = Table("kategorie", [col("id"), col("name", "varchar(80)")], [pk("id")])
@@ -97,8 +105,8 @@ def build_test_schema() -> Diagram:
         [col("artikel_id"), col("kategorie_id")],
         [pk("artikel_id", "kategorie_id"), Index("ix_kategorie", IndexKind.INDEX, ("kategorie_id",))],
         [
-            ForeignKey("fk_ak_artikel", ("artikel_id",), shop("artikel"), ("id",)),
-            ForeignKey("fk_ak_kategorie", ("kategorie_id",), shop("kategorie"), ("id",)),
+            ForeignKey("fk_ak_artikel", ("artikel_id",), ref("artikel"), ("id",)),
+            ForeignKey("fk_ak_kategorie", ("kategorie_id",), ref("kategorie"), ("id",)),
         ],
     )
     # Selbstreferenz
@@ -106,13 +114,13 @@ def build_test_schema() -> Diagram:
         "mitarbeiter",
         [col("id"), col("vorgesetzter_id", nullable=True)],
         [pk("id")],
-        [ForeignKey("fk_vorgesetzter", ("vorgesetzter_id",), shop("mitarbeiter"), ("id",))],
+        [ForeignKey("fk_vorgesetzter", ("vorgesetzter_id",), ref("mitarbeiter"), ("id",))],
     )
 
     return Diagram(
         [
             Database(
-                "shop",
+                shop_db,
                 Dialect.MYSQL,
                 [
                     Schema(
@@ -132,7 +140,7 @@ def build_test_schema() -> Diagram:
                 ],
                 charset="utf8mb4",
             ),
-            Database("stammdaten", Dialect.MYSQL, [Schema(None, [land])]),
+            Database(master_db, Dialect.MYSQL, [Schema(None, [land])]),
         ]
     )
 
