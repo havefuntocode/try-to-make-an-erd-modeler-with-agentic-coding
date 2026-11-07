@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -39,6 +39,7 @@ from erd_editor.persistence.document import (
 )
 
 APP_NAME = "ER-Diagramm-Editor"
+DISPLAY_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
 FILE_FILTER = f"ER-Diagramme (*{FILE_SUFFIX});;Alle Dateien (*)"
 USAGE_HINT = (
     "Aufruf: python -m erd_editor.main --mysql root@localhost erd_test_shop erd_test_stammdaten"
@@ -109,12 +110,51 @@ class MainWindow(QMainWindow):
 
         layout_menu = self.menuBar().addMenu("A&nordnen")
         layout_menu.addAction(self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L")))
+        layout_menu.addAction(self._action("&Rahmen an Inhalt anpassen", self.scene.fit_frames_to_content))
 
         view_menu = self.menuBar().addMenu("&Ansicht")
         view_menu.addAction(self._action("Vergrößern", self.view.zoom_in, [QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+=")]))
         view_menu.addAction(self._action("Verkleinern", self.view.zoom_out, QKeySequence.StandardKey.ZoomOut))
         view_menu.addAction(self._action("Ganzes Diagramm", self.view.zoom_to_fit, QKeySequence("Ctrl+0")))
         view_menu.addAction(self._action("100 %", lambda: self.view.set_zoom(1.0), QKeySequence("Ctrl+1")))
+        view_menu.addSeparator()
+
+        # Darstellungsgröße: wirkt auf Boxen, Schrift und Symbole – auch im Druck
+        size_menu = view_menu.addMenu("&Darstellungsgröße")
+        self.scale_group = QActionGroup(self)
+        self.scale_actions: dict[float, QAction] = {}
+        for factor in DISPLAY_SCALES:
+            action = QAction(f"{round(factor * 100)} %", self, checkable=True)
+            action.triggered.connect(lambda checked, f=factor: self.set_display_scale(f))
+            self.scale_group.addAction(action)
+            size_menu.addAction(action)
+            self.scale_actions[factor] = action
+        size_menu.addSeparator()
+        size_menu.addAction(self._action("Größer", lambda: self.step_display_scale(+1), QKeySequence("Ctrl+Shift++")))
+        size_menu.addAction(self._action("Kleiner", lambda: self.step_display_scale(-1), QKeySequence("Ctrl+Shift+-")))
+        self._sync_scale_menu()
+
+    # ------------------------------------------------------------------ Darstellungsgröße
+
+    def set_display_scale(self, factor: float) -> None:
+        self.scene.set_display_scale(factor)
+        self._sync_scale_menu()
+        self.view.zoom_to_fit()
+        self.statusBar().showMessage(f"Darstellungsgröße {round(self.scene.display_scale * 100)} %")
+
+    def step_display_scale(self, direction: int) -> None:
+        """Zur nächsten Stufe in DISPLAY_SCALES wechseln."""
+        current = self.scene.display_scale
+        if direction > 0:
+            target = next((f for f in DISPLAY_SCALES if f > current + 1e-9), DISPLAY_SCALES[-1])
+        else:
+            target = next((f for f in reversed(DISPLAY_SCALES) if f < current - 1e-9), DISPLAY_SCALES[0])
+        self.set_display_scale(target)
+
+    def _sync_scale_menu(self) -> None:
+        current = self.scene.display_scale
+        for factor, action in self.scale_actions.items():
+            action.setChecked(abs(factor - current) < 1e-9)
 
     def _update_title(self) -> None:
         name = self.path.name if self.path else "Unbenannt"
@@ -129,6 +169,7 @@ class MainWindow(QMainWindow):
     def show_document(self, document: DiagramDocument, use_layout: bool) -> None:
         self.document = document
         self.scene.load(document.diagram, document.layout if use_layout else None)
+        self._sync_scale_menu()
         problems = document.diagram.validate()
         msg = f"{len(self.scene.entities)} Tabellen aus {len(document.diagram.databases)} Datenbank(en)"
         if problems:

@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from erd_editor.model.layout import MAX_SCALE, MIN_SCALE, Frame
 from erd_editor.model import (
     Column,
     ConnectionProfile,
@@ -218,9 +219,18 @@ def _ref_from_dict(d: dict[str, Any]) -> TableRef:
 
 
 def _layout_to_dict(layout: Layout) -> dict[str, Any]:
+    databases = []
+    for name in sorted(set(layout.database_colors) | set(layout.frames)):
+        entry: dict[str, Any] = {"name": name}
+        if name in layout.database_colors:
+            entry["color"] = layout.database_colors[name]
+        if name in layout.frames:
+            entry["frame"] = [round(v, 1) for v in layout.frames[name]]
+        databases.append(entry)
     return {
         "notation": layout.notation,
-        "databases": [{"name": name, "color": color} for name, color in sorted(layout.database_colors.items())],
+        "scale": layout.scale,
+        "databases": databases,
         "entities": [
             {**_ref_to_dict(ref), "x": round(x, 1), "y": round(y, 1)}
             for ref, (x, y) in sorted(layout.positions.items(), key=lambda kv: _sort_key(kv[0]))
@@ -236,6 +246,13 @@ def _sort_key(ref: TableRef) -> tuple[str, str, str]:
 def _layout_from_dict(d: dict[str, Any]) -> Layout:
     return Layout(
         positions={_ref_from_dict(e): (float(e["x"]), float(e["y"])) for e in d.get("entities", [])},
-        database_colors={db["name"]: int(db["color"]) for db in d.get("databases", [])},
+        database_colors={db["name"]: int(db["color"]) for db in d.get("databases", []) if "color" in db},
+        frames={db["name"]: _frame(db["frame"]) for db in d.get("databases", []) if db.get("frame")},
+        scale=min(max(float(d.get("scale", 1.0)), MIN_SCALE), MAX_SCALE),
         notation=d.get("notation", "crowsfoot"),
     )
+
+
+def _frame(values: list[Any]) -> Frame:
+    x, y, w, h = (float(v) for v in values)
+    return (x, y, w, h)

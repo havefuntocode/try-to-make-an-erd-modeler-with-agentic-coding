@@ -18,6 +18,7 @@ from erd_editor.diagram.routing import Side, choose_sides, place, route_avoiding
 from erd_editor.diagram.style import EntityStyle
 from erd_editor.layout import LayoutNode, LayoutOptions, layered_layout
 from erd_editor.model import Diagram, Layout, TableRef
+from erd_editor.model.layout import MAX_SCALE, MIN_SCALE
 from erd_editor.notation import CrowsFootNotation, Notation
 
 
@@ -38,6 +39,7 @@ class DiagramScene(QGraphicsScene):
         self.containers: dict[str, ContainerItem] = {}
         self.diagram: Diagram | None = None
         self._routing_suspended = False
+        self.display_scale = 1.0  # Darstellungsgröße (1.0 = 100 %)
         self.selectionChanged.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------ Aufbau
@@ -54,12 +56,14 @@ class DiagramScene(QGraphicsScene):
         self.containers = {}
         self.clear()
         self.diagram = diagram
+        if layout is not None:
+            self.display_scale = min(max(layout.scale, MIN_SCALE), MAX_SCALE)
         base_style = style or EntityStyle()
         colors_by_db = self._assign_colors(diagram, layout.database_colors if layout else {})
         for database in diagram.databases:
             color_index = colors_by_db[database.name]
             colors = colors_for(color_index)
-            container = ContainerItem(database, colors, color_index)
+            container = ContainerItem(database, colors, color_index, self.display_scale)
             self.addItem(container)
             self.containers[database.name] = container
             # Entitäten übernehmen den Farbton ihrer Datenbank
@@ -68,17 +72,23 @@ class DiagramScene(QGraphicsScene):
                 for table in schema.tables:
                     ref = TableRef(database.name, schema.name, table.name)
                     item = EntityItem(ref, table, db_style)
+                    item.setScale(self.display_scale)
                     self.addItem(item)
                     self.entities[ref] = item
                     container.members.append(item)
         for rel in derive_relationships(diagram):
             item = RelationItem(rel, self.entities[rel.child], self.entities[rel.parent], self.notation)
+            item.scale_factor = self.display_scale
             self.addItem(item)
             self.relations.append(item)
         if layout is None:
             self.auto_layout(notify=False)
         else:
             self._apply_layout(layout)
+            for name, (x, y, w, h) in layout.frames.items():
+                if name in self.containers:
+                    self.containers[name].manual_rect = QRectF(x, y, w, h)
+            self.update_containers()
 
     @staticmethod
     def _assign_colors(diagram: Diagram, saved: dict[str, int]) -> dict[str, int]:
@@ -99,17 +109,25 @@ class DiagramScene(QGraphicsScene):
         return Layout(
             positions={ref: (item.pos().x(), item.pos().y()) for ref, item in self.entities.items()},
             database_colors={name: c.color_index for name, c in self.containers.items()},
+            frames={
+                name: (c.manual_rect.x(), c.manual_rect.y(), c.manual_rect.width(), c.manual_rect.height())
+                for name, c in self.containers.items()
+                if c.manual_rect is not None
+            },
+            scale=self.display_scale,
             notation="crowsfoot",
         )
 
     def auto_layout(self, notify: bool = True) -> None:
         """Alle Boxen automatisch anordnen (Schichten-Layout je Datenbank)."""
         nodes = [
-            LayoutNode(ref, item.rect.width(), item.rect.height(), ref.database)
-            for ref, item in self.entities.items()
+            LayoutNode(ref, self._box(ref).width(), self._box(ref).height(), ref.database)
+            for ref in self.entities
         ]
         edges = [(r.relationship.child, r.relationship.parent) for r in self.relations]
-        self._set_positions(layered_layout(nodes, edges))
+        for container in self.containers.values():
+            container.manual_rect = None
+        self._set_positions(layered_layout(nodes, edges, self._layout_options()))
         if notify:
             self.layout_changed.emit()
 
@@ -125,7 +143,7 @@ class DiagramScene(QGraphicsScene):
 
     def _apply_layout(self, layout: Layout) -> None:
         """Gespeichertes Layout anwenden und neue Tabellen sinnvoll platzieren."""
-        options = LayoutOptions()
+        options = self._layout_options()
         positions = {ref: pos for ref, pos in layout.positions.items() if ref in self.entities}
         new_by_db: dict[str, list[TableRef]] = defaultdict(list)
         for ref in self.entities:
@@ -133,7 +151,7 @@ class DiagramScene(QGraphicsScene):
                 new_by_db[ref.database].append(ref)
 
         def bottom_of(refs) -> float:
-            return max(positions[r][1] + self.entities[r].rect.height() for r in refs)
+            return max(positions[r][1] + self._box(r).height() for r in refs)
 
         new_databases = []
         for db_name, new_refs in new_by_db.items():
@@ -143,11 +161,11 @@ class DiagramScene(QGraphicsScene):
                 continue
             # Neue Tabellen in Zeilen unter die vorhandenen ihrer Datenbank
             left = min(positions[r][0] for r in known)
-            right = max(positions[r][0] + self.entities[r].rect.width() for r in known)
+            right = max(positions[r][0] + self._box(r).width() for r in known)
             max_width = max(right - left, 1000.0)
-            x, y, row_h = left, bottom_of(known) + self.NEW_TABLE_GAP, 0.0
+            x, y, row_h = left, bottom_of(known) + self.NEW_TABLE_GAP * self.display_scale, 0.0
             for ref in new_refs:
-                rect = self.entities[ref].rect
+                rect = self._box(ref)
                 if x > left and x + rect.width() > left + max_width:
                     x, y, row_h = left, y + row_h + options.row_gap, 0.0
                 positions[ref] = (x, y)
@@ -158,14 +176,80 @@ class DiagramScene(QGraphicsScene):
         edges = [(r.relationship.child, r.relationship.parent) for r in self.relations]
         for db_name in new_databases:
             refs = new_by_db[db_name]
-            nodes = [LayoutNode(r, self.entities[r].rect.width(), self.entities[r].rect.height(), db_name) for r in refs]
+            nodes = [LayoutNode(r, self._box(r).width(), self._box(r).height(), db_name) for r in refs]
             offset_y = bottom_of(positions) + options.group_gap if positions else 0.0
-            for ref, (x, y) in layered_layout(nodes, edges).items():
+            for ref, (x, y) in layered_layout(nodes, edges, options).items():
                 positions[ref] = (x, y + offset_y)
 
         self._set_positions(positions)
 
+    def _box(self, ref: TableRef) -> QRectF:
+        """Größe einer Box in Szeneneinheiten (inkl. Darstellungsgröße)."""
+        rect = self.entities[ref].rect
+        return QRectF(0, 0, rect.width() * self.display_scale, rect.height() * self.display_scale)
+
+    def _layout_options(self) -> LayoutOptions:
+        """Abstände fürs Auto-Layout bei der aktuellen Darstellungsgröße.
+
+        Die Abstände wachsen nur so weit, wie Linien, Symbole und
+        Behälterköpfe es verlangen – größere Darstellung heißt so:
+        größere Schrift im Verhältnis zum ganzen Diagramm.
+        """
+        o, f = LayoutOptions(), self.display_scale
+        stub = (self.notation.end_length(ZERO_OR_MANY) + 8) * f
+        return replace(
+            o,
+            column_gap=max(o.column_gap, 2 * stub + 30 * f),  # Platz für zwei Symbole und das Mittelstück
+            row_gap=o.row_gap * f**0.5,
+            component_gap=o.component_gap * f**0.5,
+            group_gap=o.group_gap * f,  # Behälter samt Kopfzeile wachsen voll mit
+        )
+
+    # ------------------------------------------------------------------ Darstellungsgröße
+
+    def set_display_scale(self, scale: float) -> None:
+        """Alle Boxen, Schriften und Symbole vergrößern/verkleinern.
+
+        Die Anordnung wird um die linke obere Ecke mitskaliert, damit
+        nichts überlappt und die Abstände im Verhältnis bleiben.
+        """
+        scale = round(min(max(scale, MIN_SCALE), MAX_SCALE), 2)
+        if abs(scale - self.display_scale) < 1e-9:
+            return
+        ratio = scale / self.display_scale
+        if self.entities:
+            ox = min(item.pos().x() for item in self.entities.values())
+            oy = min(item.pos().y() for item in self.entities.values())
+        else:
+            ox = oy = 0.0
+
+        def scaled(x: float, y: float) -> tuple[float, float]:
+            return ox + (x - ox) * ratio, oy + (y - oy) * ratio
+
+        self.display_scale = scale
+        positions = {ref: scaled(item.pos().x(), item.pos().y()) for ref, item in self.entities.items()}
+        for item in self.entities.values():
+            item.setScale(scale)
+        for rel in self.relations:
+            rel.scale_factor = scale
+        for container in self.containers.values():
+            container.set_scale(scale)
+            if container.manual_rect is not None:
+                r = container.manual_rect
+                x, y = scaled(r.x(), r.y())
+                container.manual_rect = QRectF(x, y, r.width() * ratio, r.height() * ratio)
+        self._set_positions(positions)
+        self.layout_changed.emit()
+
     # ------------------------------------------------------------------ Behälter
+
+    def fit_frames_to_content(self) -> None:
+        """Alle von Hand aufgezogenen Rahmen auf ihren Inhalt zurücksetzen."""
+        changed = any(c.manual_rect is not None for c in self.containers.values())
+        for container in self.containers.values():
+            container.fit_to_content()
+        if changed:
+            self.layout_changed.emit()
 
     def container_of(self, item: EntityItem) -> ContainerItem | None:
         return self.containers.get(item.ref.database)
@@ -208,8 +292,9 @@ class DiagramScene(QGraphicsScene):
         """
         if not self.relations:
             return
-        stub = self.notation.end_length(ZERO_OR_MANY) + 8
-        spacing = 2 * self.notation.end_width() + 4
+        f = self.display_scale
+        stub = (self.notation.end_length(ZERO_OR_MANY) + 8) * f
+        spacing = (2 * self.notation.end_width() + 4) * f
 
         def scene_rect(item: EntityItem) -> QRectF:
             return item.mapRectToScene(item.rect)
@@ -250,7 +335,7 @@ class DiagramScene(QGraphicsScene):
         for key, indices in groups.items():
             parent = self.relations[indices[0]].parent_item
             p_rect = scene_rect(parent)
-            margin = parent.style.radius + 4
+            margin = (parent.style.radius + 4) * f
             ys = place(
                 [desired[i] for i in indices],
                 child_ends.get(key, []),
@@ -267,12 +352,12 @@ class DiagramScene(QGraphicsScene):
             rel = rel_item.relationship
             child_side, parent_side = sides[i]
             if child_side is parent_side:
-                offset = rel.parallel_index * self.PARALLEL_OFFSET
+                offset = rel.parallel_index * self.PARALLEL_OFFSET * f
             else:
-                offset = (rel.parallel_index - (rel.parallel_count - 1) / 2) * self.PARALLEL_OFFSET
+                offset = (rel.parallel_index - (rel.parallel_count - 1) / 2) * self.PARALLEL_OFFSET * f
             skip = {id(rel_item.child_item), id(rel_item.parent_item)}
             obstacles = [r for key, r in all_rects.items() if key not in skip]
-            points = route_avoiding(starts[i], child_side, ends[i], parent_side, stub, offset, obstacles)
+            points = route_avoiding(starts[i], child_side, ends[i], parent_side, stub, offset, obstacles, 14.0 * f)
             rel_item.set_route(points, child_side, parent_side)
 
     def _on_selection_changed(self) -> None:

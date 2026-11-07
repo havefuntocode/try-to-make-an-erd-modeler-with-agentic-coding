@@ -34,6 +34,7 @@ class RelationItem(QGraphicsItem):
         self.child_item = child
         self.parent_item = parent
         self.notation = notation
+        self.scale_factor = 1.0  # Darstellungsgröße, setzt die Szene
         self.points: list[QPointF] = []
         self.child_side = Side.RIGHT
         self.parent_side = Side.LEFT
@@ -60,12 +61,12 @@ class RelationItem(QGraphicsItem):
         return QPainterPath(self._path)
 
     def boundingRect(self) -> QRectF:
-        m = self.notation.end_width() + self.HIGHLIGHT_WIDTH + 2
+        m = (self.notation.end_width() + self.HIGHLIGHT_WIDTH + 2) * self.scale_factor
         return self._path.boundingRect().adjusted(-m, -m, m, m)
 
     def shape(self) -> QPainterPath:
         stroker = QPainterPathStroker()
-        stroker.setWidth(8)  # großzügige Trefferfläche für Tooltip
+        stroker.setWidth(8 * self.scale_factor)  # großzügige Trefferfläche für Tooltip
         return stroker.createStroke(self._path)
 
     # ------------------------------------------------------------------ Zeichnen
@@ -79,7 +80,7 @@ class RelationItem(QGraphicsItem):
             return
         hl = self.highlighted
         color = HIGHLIGHT_COLOR if hl else LINE_COLOR
-        width = self.HIGHLIGHT_WIDTH if hl else self.LINE_WIDTH
+        width = (self.HIGHLIGHT_WIDTH if hl else self.LINE_WIDTH) * self.scale_factor
 
         line_pen = QPen(color, width)
         line_pen.setStyle(Qt.PenStyle.SolidLine if self.relationship.identifying else Qt.PenStyle.DashLine)
@@ -88,13 +89,20 @@ class RelationItem(QGraphicsItem):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(self._path)
 
-        symbol_pen = QPen(color, width)
-        painter.setPen(symbol_pen)
-        painter.setBrush(SYMBOL_FILL)
         rel = self.relationship
         # Am Kind steht, wie viele Kinder ein Elternteil hat – und umgekehrt
-        self.notation.draw_end(painter, self.points[0], self.child_side.direction, rel.child_end)
-        self.notation.draw_end(painter, self.points[-1], self.parent_side.direction, rel.parent_end)
+        self._draw_end(painter, color, self.points[0], self.child_side, rel.child_end)
+        self._draw_end(painter, color, self.points[-1], self.parent_side, rel.parent_end)
+
+    def _draw_end(self, painter: QPainter, color: QColor, tip: QPointF, side: Side, cardinality) -> None:
+        """Symbol in Einheitsgröße zeichnen und per Transformation skalieren."""
+        painter.save()
+        painter.translate(tip)
+        painter.scale(self.scale_factor, self.scale_factor)
+        painter.setPen(QPen(color, self.HIGHLIGHT_WIDTH if self.highlighted else self.LINE_WIDTH))
+        painter.setBrush(SYMBOL_FILL)
+        self.notation.draw_end(painter, QPointF(0, 0), side.direction, cardinality)
+        painter.restore()
 
     # ------------------------------------------------------------------ Tooltip
 

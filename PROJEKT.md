@@ -163,6 +163,8 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [x] Sonderfälle (Selbstreferenz, mehrspaltige FKs, Mehrfach-FKs)
 - [x] Auto-Layout
 - [x] Verschieben, Zoom
+- [x] Darstellungsgröße 100–200 % (Schrift, Boxen, Symbole; gespeichert)
+- [x] Datenbank-Rahmen von Hand aufziehen
 - [x] Speichern/Laden (JSON), Neu einlesen ohne Layoutverlust
 - [ ] Passwörter über `keyring`
 - [ ] Drucken, PDF- und PNG-Export
