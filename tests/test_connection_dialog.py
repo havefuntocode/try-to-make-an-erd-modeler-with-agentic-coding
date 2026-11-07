@@ -102,11 +102,26 @@ class TestDialog:
         assert d.choice().add_to_diagram
         assert not ConnectionDialog(can_add=False, adapter_factory=fake).choice().add_to_diagram
 
-    def test_other_dialects_disabled(self, qapp):
+    def test_dialects_enabled(self, qapp):
         d = ConnectionDialog()
         model = d.dialect.model()
-        assert model.item(0).isEnabled()
-        assert not model.item(1).isEnabled() and not model.item(2).isEnabled()
+        assert model.item(0).isEnabled() and model.item(1).isEnabled()  # MySQL, PostgreSQL
+        assert not model.item(2).isEnabled()  # SQL Server folgt
+
+    def test_dialect_switch_sets_defaults(self, qapp):
+        d = ConnectionDialog()
+        d.dialect.setCurrentIndex(1)
+        assert (d.port.value(), d.user.text()) == (5432, "postgres")
+        assert d.profile().dialect is Dialect.POSTGRESQL
+        d.dialect.setCurrentIndex(0)
+        assert (d.port.value(), d.user.text()) == (3306, "root")
+
+    def test_dialect_switch_keeps_own_values(self, qapp):
+        d = ConnectionDialog()
+        d.port.setValue(6000)
+        d.user.setText("ich")
+        d.dialect.setCurrentIndex(1)
+        assert (d.port.value(), d.user.text()) == (6000, "ich")
 
 
 class TestMainWindowReading:

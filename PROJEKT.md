@@ -120,7 +120,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 
 ### Notation
 - Version 1: **Krähenfuß (IE)**
-- Später: UML (`1`, `0..*`), (min,max), IDEF1X – nur Linienenden und Beschriftung tauschen
+- Später: (min,max), IDEF1X – nur Linienenden und Beschriftung tauschen (UML bewusst nicht)
 - Chen-Notation als eigene konzeptionelle Ansicht (Rauten, Ovale) – spätere Ausbaustufe
 
 ### Kardinalitäten (automatisch abgeleitet)
@@ -176,7 +176,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [ ] Export SVG (PNG ist in Version 1 vorgezogen)
 - [ ] Undo/Redo (`QUndoStack`) – zunächst für Layout-Aktionen, Fundament für Version 3
 - [ ] Manuelle Überschreibungen (schwache Entität, Mindestkardinalität)
-- [ ] Weitere Notationen (UML, (min,max), IDEF1X)
+- [ ] Weitere Notationen ((min,max), IDEF1X) – UML bewusst nicht
 
 ### Version 3 – Modellieren
 Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.

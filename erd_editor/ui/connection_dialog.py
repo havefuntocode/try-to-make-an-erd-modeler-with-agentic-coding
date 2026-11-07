@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from erd_editor.adapters.base import AdapterError, SchemaAdapter
 from erd_editor.adapters.mysql import MySqlAdapter
+from erd_editor.adapters.postgres import PostgresAdapter
 from erd_editor.model import ConnectionProfile, Dialect
 from erd_editor.persistence import credentials
 
@@ -33,14 +34,19 @@ AdapterFactory = Callable[[ConnectionProfile, str | None], SchemaAdapter]
 
 DIALECTS = [
     (Dialect.MYSQL, "MySQL", 3306, True),
-    (Dialect.POSTGRESQL, "PostgreSQL (ab Version 2)", 5432, False),
+    (Dialect.POSTGRESQL, "PostgreSQL", 5432, True),
     (Dialect.MSSQL, "SQL Server (ab Version 2)", 1433, False),
 ]
+
+
+DEFAULT_USERS = {Dialect.MYSQL: "root", Dialect.POSTGRESQL: "postgres", Dialect.MSSQL: "sa"}
 
 
 def default_adapter_factory(profile: ConnectionProfile, password: str | None) -> SchemaAdapter:
     if profile.dialect is Dialect.MYSQL:
         return MySqlAdapter(profile, password)
+    if profile.dialect is Dialect.POSTGRESQL:
+        return PostgresAdapter(profile, password)
     raise AdapterError(f"Dialekt {profile.dialect.value} folgt in Version 2")
 
 
@@ -91,6 +97,7 @@ class ConnectionDialog(QDialog):
         self.port.setRange(1, 65535)
         self.port.setValue(3306)
         self.user = QLineEdit("root")
+        self.dialect.currentIndexChanged.connect(self._dialect_changed)
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.save_password = QCheckBox("Passwort in der Windows-Anmeldeinformationsverwaltung speichern")
@@ -148,6 +155,15 @@ class ConnectionDialog(QDialog):
         self._update_ok()
 
     # ------------------------------------------------------------------ Profil
+
+    def _dialect_changed(self, _index: int) -> None:
+        """Standard-Port und -Benutzer übernehmen, solange der Nutzer sie nicht geändert hat."""
+        dialect = Dialect(self.dialect.currentData())
+        if self.port.value() in {port for _, _, port, _ in DIALECTS}:
+            self.port.setValue(next(port for d, _, port, _ in DIALECTS if d is dialect))
+        if self.user.text() in DEFAULT_USERS.values():
+            self.user.setText(DEFAULT_USERS[dialect])
+        self.database_list.clear()
 
     def _fill_from_saved(self, index: int) -> None:
         if index <= 0:
