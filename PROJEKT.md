@@ -157,12 +157,12 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 ### Version 1
 - [x] Neutrales Datenmodell
 - [x] MySQL-Adapter (Tabellen, Spalten, PK, FK, Indexe, Kommentare)
-- [ ] Entitätsboxen mit Icons und Indexbereich
+- [x] Entitätsboxen mit Icons und Indexbereich
 - [ ] Datenbank-Behälter, mehrere Datenbanken mit eigenen Farben
 - [ ] Beziehungen: Krähenfuß, identifizierend/nicht-identifizierend, abgeleitete Kardinalitäten
 - [ ] Sonderfälle (Selbstreferenz, mehrspaltige FKs, Mehrfach-FKs)
 - [ ] Auto-Layout
-- [ ] Verschieben, Zoom
+- [x] Verschieben, Zoom
 - [ ] Speichern/Laden (JSON), Neu einlesen ohne Layoutverlust
 - [ ] Passwörter über `keyring`
 - [ ] Drucken und PDF-Export
