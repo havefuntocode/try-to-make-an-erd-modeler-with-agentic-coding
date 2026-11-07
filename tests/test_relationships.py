@@ -25,7 +25,10 @@ from erd_editor.model import (
     Table,
     TableRef,
 )
-from tests.conftest import shop
+
+
+def shop(table: str) -> TableRef:
+    return TableRef("shop", None, table)
 
 
 @pytest.fixture

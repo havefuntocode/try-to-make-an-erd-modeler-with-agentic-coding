@@ -2,25 +2,42 @@
 
 Voraussetzungen:
 - tests/schema/mysql.sql ist eingespielt
-- Umgebungsvariablen: ERD_MYSQL_USER, ERD_MYSQL_PASSWORD,
-  optional ERD_MYSQL_HOST (Standard localhost) und ERD_MYSQL_PORT (Standard 3306)
+- Passwort entweder im keyring (einmalig, empfohlen):
+      .venv/Scripts/python -m keyring set erd-editor-test root
+  oder in der Umgebungsvariable ERD_MYSQL_PASSWORD
+- optional: ERD_MYSQL_USER (Standard root), ERD_MYSQL_HOST (localhost), ERD_MYSQL_PORT (3306)
 
-Ohne ERD_MYSQL_USER wird der Test übersprungen.
+Ohne Passwort wird der Test übersprungen.
 """
 
 import os
 
+import keyring
 import pytest
 
 from erd_editor.adapters.mysql import MySqlAdapter
 from erd_editor.analysis import derive_relationships
 from erd_editor.model import ConnectionProfile, Diagram, Dialect
-from tests.conftest import build_test_schema
 
 SHOP, MASTER = "erd_test_shop", "erd_test_stammdaten"
+KEYRING_SERVICE = "erd-editor-test"
+USER = os.environ.get("ERD_MYSQL_USER", "root")
+
+
+def _password() -> str | None:
+    if "ERD_MYSQL_PASSWORD" in os.environ:
+        return os.environ["ERD_MYSQL_PASSWORD"]
+    try:
+        return keyring.get_password(KEYRING_SERVICE, USER)
+    except keyring.errors.KeyringError:
+        return None
+
+
+PASSWORD = _password()
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ERD_MYSQL_USER"), reason="ERD_MYSQL_USER nicht gesetzt (kein Live-MySQL)"
+    PASSWORD is None,
+    reason=f"kein Passwort (keyring {KEYRING_SERVICE!r}/{USER!r} oder ERD_MYSQL_PASSWORD)",
 )
 
 
@@ -31,9 +48,9 @@ def live() -> Diagram:
         Dialect.MYSQL,
         host=os.environ.get("ERD_MYSQL_HOST", "localhost"),
         port=int(os.environ.get("ERD_MYSQL_PORT", "3306")),
-        user=os.environ["ERD_MYSQL_USER"],
+        user=USER,
     )
-    with MySqlAdapter(profile, os.environ.get("ERD_MYSQL_PASSWORD")) as adapter:
+    with MySqlAdapter(profile, PASSWORD) as adapter:
         available = adapter.list_databases()
         if SHOP not in available or MASTER not in available:
             pytest.skip("Testschema nicht eingespielt (tests/schema/mysql.sql)")
@@ -41,8 +58,8 @@ def live() -> Diagram:
 
 
 @pytest.fixture(scope="module")
-def expected() -> Diagram:
-    return build_test_schema(SHOP, MASTER)
+def expected(schema_builder) -> Diagram:
+    return schema_builder(SHOP, MASTER)
 
 
 def test_live_schema_is_consistent(live):

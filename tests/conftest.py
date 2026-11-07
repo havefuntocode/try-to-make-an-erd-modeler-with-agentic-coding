@@ -148,3 +148,9 @@ def build_test_schema(shop_db: str = "shop", master_db: str = "stammdaten") -> D
 @pytest.fixture
 def test_schema() -> Diagram:
     return build_test_schema()
+
+
+@pytest.fixture(scope="session")
+def schema_builder():
+    """Liefert build_test_schema, damit Tests eigene Datenbanknamen wählen können."""
+    return build_test_schema
