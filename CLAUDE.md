@@ -36,7 +36,7 @@ erd_editor/
   layout/         # Auto-Layout
   persistence/    # Laden/Speichern (JSON)
   export/         # Drucken, PDF, PNG, SVG
-  ui/             # Dialoge (Verbindung …)
+  ui/             # Dialoge, Reiter, Modellieren, Rückgängig-Befehle
   resources/icons # SVG-Icons
 tests/
   schema/         # Testschema für alle drei Dialekte

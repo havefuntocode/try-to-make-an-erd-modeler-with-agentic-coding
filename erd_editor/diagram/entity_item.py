@@ -320,6 +320,14 @@ class EntityItem(QGraphicsObject):
             return "<b>Ausgeblendet:</b><br>" + "<br>".join(names)
         return ""
 
+    def mouseDoubleClickEvent(self, event) -> None:
+        scene = self.scene()
+        if scene is not None and hasattr(scene, "entity_activated"):
+            scene.entity_activated.emit(self.ref)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
         self.setToolTip(self.tooltip_at(event.pos()))
         super().hoverMoveEvent(event)

@@ -42,6 +42,7 @@ class DiagramScene(QGraphicsScene):
     gesture_finished = Signal(object, object, str)
     # Rechtsklick auf eine Linie: RelationItem, Bildschirmposition
     relation_context_requested = Signal(object, object)
+    entity_activated = Signal(object)  # Doppelklick auf eine Box: TableRef
 
     def __init__(self, parent=None, notation: Notation | None = None) -> None:
         super().__init__(parent)

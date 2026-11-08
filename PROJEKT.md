@@ -183,16 +183,17 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 ### Version 3 – Modellieren
 Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
 
-- [ ] Datei → Neu; „Neue Datenbank (ohne Verbindung)“ mit Dialektwahl
-- [ ] Modellierte und eingelesene Datenbanken unterscheiden: eingelesene bleiben
+- [x] Datei → Neu; „Neue Datenbank (ohne Verbindung)“ mit Dialektwahl
+- [x] Modellierte und eingelesene Datenbanken unterscheiden: eingelesene bleiben
       schreibgeschützt, „Als Modell übernehmen“ erzeugt eine bearbeitbare Kopie
-- [ ] Entität anlegen/bearbeiten (Doppelklick): Name, Kommentar, Spalten
-      (Name, Typ, NULL, Default, PK, Auto-Increment), Indexe
-- [ ] Datentyp-Auswahl je Dialekt (nativ, ohne Mapping)
+- [x] Entität anlegen/bearbeiten (Doppelklick): Name, Kommentar, Spalten
+      (Name, Typ, NULL, Default, PK, Auto-Increment)
+- [ ] Indexe im Tabelleneditor bearbeiten (UNIQUE, INDEX, FULLTEXT …)
+- [x] Datentyp-Auswahl je Dialekt (nativ, ohne Mapping)
 - [ ] Beziehungs-Werkzeug: vom Kind zum Elternteil ziehen, 1:n/1:1 und
       identifizierend/nicht-identifizierend wählen; FK-Spalten werden automatisch
       angelegt (Typ vom PK, bei identifizierend in den PK, bei 1:1 UNIQUE)
-- [ ] Löschen und Umbenennen mit allen Folgen (abhängige FKs)
+- [x] Löschen und Umbenennen mit allen Folgen (abhängige FKs, Positionen, Teildiagramme)
 - [ ] Alle Bearbeitungen über Undo/Redo
 - [ ] Szene gezielt aktualisieren statt komplett neu aufbauen
 - [ ] SQL-Export (`CREATE TABLE …`) für MySQL
@@ -222,7 +223,20 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Spalten- und Tabellenkommentare
 - bei MySQL zusätzlich ein FK in eine zweite Datenbank
 
-## 12. Offene Punkte
+## 12. Hinweise für die Entwicklung
+
+- Umgebung: `.venv` (Python 3.11), Projekt editierbar installiert (`pip install -e .`)
+- Tests: `.venv\Scripts\python -m pytest -q` (Qt läuft dabei ohne Fenster)
+- Start: `.venv\Scripts\python -m erd_editor.main` (ohne Argumente öffnet „Datenbank einlesen“)
+- Testschema `erd_test_shop` ist eingespielt in MySQL (mit `erd_test_stammdaten`),
+  PostgreSQL und SQL Server (`tests/schema/*.sql`)
+- Live-Tests holen Passwörter aus dem keyring, Dienst `erd-editor-test`:
+  Konten `root` (MySQL) und `postgres` (PostgreSQL); SQL Server per Windows-Anmeldung
+- Die Anwendung selbst speichert Passwörter unter dem Dienst `erd-editor`
+- Tests, die ein echtes Menü oder einen Dialog öffnen würden, nicht mit `exec()` schreiben,
+  sondern das Menü bauen und Aktionen direkt auslösen (sonst hängt der Testlauf)
+
+## 13. Offene Punkte
 
 - Endgültiger Projektname
 - Sprache der Oberfläche (Deutsch, später mehrsprachig?) – Code-Bezeichner: Englisch, Kommentare: Deutsch (entschieden)

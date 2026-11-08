@@ -106,6 +106,8 @@ class ContainerItem(QGraphicsObject):
     def info_text(self) -> str:
         """Zweite Kopfzeile: Dialekt/Version, Zeichensatz/Kollation."""
         db = self.database
+        if db.modeled:
+            return f"Modell · {DIALECT_NAMES.get(db.dialect.value, db.dialect.value)}"
         parts = [" ".join(p for p in (DIALECT_NAMES.get(db.dialect.value, db.dialect.value), db.server_version) if p)]
         if db.charset or db.collation:
             parts.append(" / ".join(p for p in (db.charset, db.collation) if p))

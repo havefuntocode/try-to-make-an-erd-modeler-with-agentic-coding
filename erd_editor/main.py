@@ -37,6 +37,7 @@ from erd_editor.notation import NOTATIONS
 from erd_editor.model import ColumnMode, ConnectionProfile, Database, Diagram, Dialect, Layout
 from erd_editor.persistence import credentials
 from erd_editor.ui.commands import DocumentCommand, LayoutCommand
+from erd_editor.ui.modeling import ModelingMixin
 from erd_editor.ui.subdiagram_tabs import MAIN_VIEW_TITLE, SubdiagramTabsMixin
 from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory, needs_password
 from erd_editor.persistence.document import (
@@ -94,7 +95,7 @@ def describe_changes(old: Diagram, new: Diagram) -> str:
     return f"Neu eingelesen – {added} neu, {removed} entfernt"
 
 
-class MainWindow(SubdiagramTabsMixin, QMainWindow):
+class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.resize(1200, 800)
@@ -111,6 +112,7 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.scene.gesture_finished.connect(self._push_gesture)
         self.scene.relation_context_requested.connect(self.relation_menu)
+        self.scene.entity_activated.connect(self.edit_table)
         self._init_tabs()
         self._create_menus()
         self._update_title()
@@ -127,6 +129,7 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
 
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&Datei")
+        file_menu.addAction(self._action("&Neu", self.new_document, QKeySequence.StandardKey.New))
         file_menu.addAction(self._action("&Datenbank einlesen …", self.open_connection_dialog, QKeySequence("Ctrl+D")))
         file_menu.addSeparator()
         file_menu.addAction(self._action("Ö&ffnen …", self.open_dialog, QKeySequence.StandardKey.Open))
@@ -155,6 +158,14 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
         layout_menu = self.menuBar().addMenu("A&nordnen")
         layout_menu.addAction(self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L")))
         layout_menu.addAction(self._action("&Rahmen an Inhalt anpassen", self.fit_frames))
+
+        model_menu = self.menuBar().addMenu("&Modell")
+        model_menu.addAction(self._action("Neue &Datenbank …", self.new_database_dialog))
+        model_menu.addAction(self._action("Neue &Tabelle …", self.new_table_dialog, QKeySequence("Ctrl+Shift+N")))
+        model_menu.addAction(self._action("Tabelle &bearbeiten …", self._edit_selected_table, QKeySequence("Return")))
+        model_menu.addAction(self._action("Tabellen &löschen …", self.delete_selected_tables, QKeySequence.StandardKey.Delete))
+        model_menu.addSeparator()
+        model_menu.addAction(self._action("Als &Modell übernehmen …", self.take_over_dialog))
 
         sub_menu = self.menuBar().addMenu("&Teildiagramm")
         sub_menu.addAction(self._action("&Neu …", self.new_subdiagram, QKeySequence("Ctrl+T")))
@@ -366,6 +377,13 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
         view = self.current_view
         self.undo_stack.push(LayoutCommand(self.scene, before, after, text, self._sync_menus,
                                            prepare=lambda: self.activate_view(view)))
+
+    def _edit_selected_table(self) -> None:
+        refs = self.selected_refs()
+        if len(refs) == 1:
+            self.edit_table(refs[0])
+        else:
+            self.statusBar().showMessage("Bitte genau eine Tabelle markieren")
 
     def _sync_menus(self) -> None:
         self._sync_scale_menu()

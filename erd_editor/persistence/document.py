@@ -168,6 +168,7 @@ def _database_to_dict(db: Database) -> dict[str, Any]:
         "server_version": db.server_version,
         "charset": db.charset,
         "collation": db.collation,
+        "modeled": db.modeled,
         "schemas": [{"name": s.name, "tables": [_table_to_dict(t) for t in s.tables]} for s in db.schemas],
     }
 
@@ -181,6 +182,7 @@ def _database_from_dict(d: dict[str, Any]) -> Database:
         server_version=d.get("server_version"),
         charset=d.get("charset"),
         collation=d.get("collation"),
+        modeled=bool(d.get("modeled", False)),
     )
 
 

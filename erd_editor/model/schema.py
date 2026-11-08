@@ -181,6 +181,7 @@ class Database:
     server_version: str | None = None
     charset: str | None = None
     collation: str | None = None
+    modeled: bool = False  # selbst modelliert (bearbeitbar), nicht aus einer Datenbank eingelesen
 
     def schema(self, name: str | None) -> Schema | None:
         return next((s for s in self.schemas if s.name == name), None)
