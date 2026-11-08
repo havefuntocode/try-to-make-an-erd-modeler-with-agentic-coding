@@ -172,7 +172,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 ### Version 2
 - [x] PostgreSQL-Adapter
 - [x] Schemas als innere Rechtecke (PostgreSQL, SQL Server)
-- [ ] SQL-Server-Adapter
+- [x] SQL-Server-Adapter (Windows-Anmeldung oder SQL-Login)
 - [ ] Darstellungsoptionen: Datentypen ein/aus, nur Schlüsselspalten, Kommentare
 - [ ] Mehrere Teildiagramme pro Datenbank (z. B. „Bestellwesen“, „Personal“)
 - [ ] Export SVG (PNG ist in Version 1 vorgezogen)

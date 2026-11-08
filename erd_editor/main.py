@@ -32,7 +32,7 @@ from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, exp
 from erd_editor.export.render import page_layout
 from erd_editor.model import ConnectionProfile, Database, Diagram, Dialect
 from erd_editor.persistence import credentials
-from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory
+from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory, needs_password
 from erd_editor.persistence.document import (
     FILE_SUFFIX,
     DiagramDocument,
@@ -227,6 +227,8 @@ class MainWindow(QMainWindow):
         `save_password=None` heißt: bei neu eingegebenem Passwort nachfragen.
         """
         newly_entered = False
+        if password is None and not needs_password(profile):
+            password, save_password = "", False  # Windows-Anmeldung
         if password is None:
             password, newly_entered = self._password_for(profile)
             if password is None:

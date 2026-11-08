@@ -105,8 +105,50 @@ class TestDialog:
     def test_dialects_enabled(self, qapp):
         d = ConnectionDialog()
         model = d.dialect.model()
-        assert model.item(0).isEnabled() and model.item(1).isEnabled()  # MySQL, PostgreSQL
-        assert not model.item(2).isEnabled()  # SQL Server folgt
+        assert all(model.item(i).isEnabled() for i in range(3))  # MySQL, PostgreSQL, SQL Server
+
+    def test_windows_auth_only_for_sql_server(self, qapp):
+        d = ConnectionDialog()
+        d.show()
+        assert d.windows_auth.isHidden()
+        d.dialect.setCurrentIndex(2)
+        assert not d.windows_auth.isHidden() and d.windows_auth.isChecked()
+        assert not d.user.isEnabled() and not d.password.isEnabled()
+        p = d.profile()
+        assert (p.dialect, p.port, p.user, p.options, p.name) == (Dialect.MSSQL, None, None, {"auth": "windows"}, "windows@localhost")
+        assert not d.choice().save_password
+        d.close()
+
+    def test_sql_login(self, qapp):
+        d = ConnectionDialog()
+        d.dialect.setCurrentIndex(2)
+        d.windows_auth.setChecked(False)
+        assert d.user.isEnabled() and d.password.isEnabled()
+        assert d.user.text() == "sa"
+        p = d.profile()
+        assert (p.user, p.options, p.name) == ("sa", {"auth": "sql"}, "sa@localhost")
+
+    def test_saved_windows_profile(self, qapp, fake):
+        saved = ConnectionProfile("srv", Dialect.MSSQL, "srv", None, None, {"auth": "windows"})
+        d = ConnectionDialog([saved], adapter_factory=fake)
+        assert d.windows_auth.isChecked()
+        assert d.profile() == saved
+
+    def test_needs_password(self):
+        from erd_editor.ui.connection_dialog import needs_password
+
+        assert needs_password(ConnectionProfile("m", Dialect.MYSQL, "h"))
+        assert not needs_password(ConnectionProfile("w", Dialect.MSSQL, "h", options={"auth": "windows"}))
+        assert needs_password(ConnectionProfile("s", Dialect.MSSQL, "h", options={"auth": "sql"}))
+
+    def test_live_sql_server_windows_auth(self, qapp):
+        """Echter SQL Server per Windows-Anmeldung (übersprungen, wenn nicht erreichbar)."""
+        d = ConnectionDialog()
+        d.dialect.setCurrentIndex(2)
+        if not d.connect_to_server():
+            pytest.skip(f"SQL Server nicht erreichbar: {d.status.text()}")
+        names = [d.database_list.item(i).text() for i in range(d.database_list.count())]
+        assert "master" not in names
 
     def test_dialect_switch_sets_defaults(self, qapp):
         d = ConnectionDialog()
@@ -172,6 +214,21 @@ class TestMainWindowReading:
         monkeypatch.setattr(QMessageBox, "critical", lambda *a: messages.append(a[2]))
         assert window.read_databases(self.PROFILE, ["shop"], "falsch", False) is None
         assert "verweigert" in messages[0]
+
+    def test_windows_auth_reads_without_password_prompt(self, window, monkeypatch, fake):
+        from erd_editor.adapters.base import AdapterError
+
+        class WinAdapter(fake):
+            dialect = Dialect.MSSQL
+
+            def connect(self):
+                if self._password not in ("", None):
+                    raise AdapterError("unerwartetes Passwort")
+
+        window.adapter_factory = WinAdapter
+        monkeypatch.setattr(window, "_password_for", lambda p: pytest.fail("Passwortabfrage bei Windows-Anmeldung"))
+        profile = ConnectionProfile("windows@localhost", Dialect.MSSQL, "localhost", options={"auth": "windows"})
+        assert [db.name for db in window.read_databases(profile, ["shop"])] == ["shop"]
 
     def test_save_password_only_when_wanted(self, window, monkeypatch):
         saved = []

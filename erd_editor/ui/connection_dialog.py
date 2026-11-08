@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from erd_editor.adapters.base import AdapterError, SchemaAdapter
+from erd_editor.adapters.mssql import MssqlAdapter
 from erd_editor.adapters.mysql import MySqlAdapter
 from erd_editor.adapters.postgres import PostgresAdapter
 from erd_editor.model import ConnectionProfile, Dialect
@@ -35,7 +36,7 @@ AdapterFactory = Callable[[ConnectionProfile, str | None], SchemaAdapter]
 DIALECTS = [
     (Dialect.MYSQL, "MySQL", 3306, True),
     (Dialect.POSTGRESQL, "PostgreSQL", 5432, True),
-    (Dialect.MSSQL, "SQL Server (ab Version 2)", 1433, False),
+    (Dialect.MSSQL, "SQL Server", 1433, True),
 ]
 
 
@@ -47,7 +48,14 @@ def default_adapter_factory(profile: ConnectionProfile, password: str | None) ->
         return MySqlAdapter(profile, password)
     if profile.dialect is Dialect.POSTGRESQL:
         return PostgresAdapter(profile, password)
-    raise AdapterError(f"Dialekt {profile.dialect.value} folgt in Version 2")
+    if profile.dialect is Dialect.MSSQL:
+        return MssqlAdapter(profile, password)
+    raise AdapterError(f"Dialekt {profile.dialect.value} wird nicht unterstützt")
+
+
+def needs_password(profile: ConnectionProfile) -> bool:
+    """Windows-Anmeldung bei SQL Server kommt ohne Passwort aus."""
+    return not (profile.dialect is Dialect.MSSQL and profile.options.get("auth", "windows") == "windows")
 
 
 @dataclass
@@ -102,6 +110,9 @@ class ConnectionDialog(QDialog):
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.save_password = QCheckBox("Passwort in der Windows-Anmeldeinformationsverwaltung speichern")
         self.save_password.setChecked(True)
+        self.windows_auth = QCheckBox("Windows-Anmeldung (ohne Benutzer und Passwort)")
+        self.windows_auth.setChecked(True)
+        self.windows_auth.toggled.connect(self._update_auth_fields)
 
         form = QFormLayout()
         form.addRow("Gespeichert:", self.saved)
@@ -112,6 +123,7 @@ class ConnectionDialog(QDialog):
         host_row.addWidget(QLabel("Port:"))
         host_row.addWidget(self.port)
         form.addRow("Server:", host_row)
+        form.addRow("", self.windows_auth)
         form.addRow("Benutzer:", self.user)
         form.addRow("Passwort:", self.password)
         form.addRow("", self.save_password)
@@ -150,6 +162,7 @@ class ConnectionDialog(QDialog):
         layout.addWidget(db_box, 1)
         layout.addWidget(self.buttons)
 
+        self._update_auth_fields()
         if self._profiles:
             self.saved.setCurrentIndex(1)
         self._update_ok()
@@ -164,6 +177,18 @@ class ConnectionDialog(QDialog):
         if self.user.text() in DEFAULT_USERS.values():
             self.user.setText(DEFAULT_USERS[dialect])
         self.database_list.clear()
+        self._update_auth_fields()
+
+    def _uses_windows_auth(self) -> bool:
+        return Dialect(self.dialect.currentData()) is Dialect.MSSQL and self.windows_auth.isChecked()
+
+    def _update_auth_fields(self, *_args) -> None:
+        """Windows-Anmeldung nur bei SQL Server; dann ohne Benutzer und Passwort."""
+        is_mssql = Dialect(self.dialect.currentData()) is Dialect.MSSQL
+        self.windows_auth.setVisible(is_mssql)
+        sql_login = not self._uses_windows_auth()
+        for widget in (self.user, self.password, self.save_password):
+            widget.setEnabled(sql_login)
 
     def _fill_from_saved(self, index: int) -> None:
         if index <= 0:
@@ -174,8 +199,10 @@ class ConnectionDialog(QDialog):
         self.host.setText(p.host)
         self.port.setValue(p.port or next(port for d, _, port, _ in DIALECTS if d is p.dialect))
         self.user.setText(p.user or "")
-        stored = credentials.get_password(p)
+        self.windows_auth.setChecked(not needs_password(p) if p.dialect is Dialect.MSSQL else True)
+        stored = credentials.get_password(p) if needs_password(p) else None
         self.password.setText(stored or "")
+        self._update_auth_fields()
         self.database_list.clear()
 
     def profile(self) -> ConnectionProfile:
@@ -184,8 +211,14 @@ class ConnectionDialog(QDialog):
         dialect = Dialect(self.dialect.currentData())
         default_port = next(port for d, _, port, _ in DIALECTS if d is dialect)
         port = self.port.value()
-        name = self.name.text().strip() or (f"{user}@{host}" + (f":{port}" if port != default_port else ""))
-        return ConnectionProfile(name, dialect, host, None if port == default_port else port, user or None)
+        options: dict[str, str] = {}
+        if dialect is Dialect.MSSQL:
+            options["auth"] = "windows" if self.windows_auth.isChecked() else "sql"
+            if self.windows_auth.isChecked():
+                user = ""
+        login = user or "windows"
+        name = self.name.text().strip() or (f"{login}@{host}" + (f":{port}" if port != default_port else ""))
+        return ConnectionProfile(name, dialect, host, None if port == default_port else port, user or None, options)
 
     # ------------------------------------------------------------------ Verbinden
 
@@ -222,7 +255,7 @@ class ConnectionDialog(QDialog):
         return ConnectionChoice(
             profile=self.profile(),
             password=self.password.text(),
-            save_password=self.save_password.isChecked(),
+            save_password=self.save_password.isChecked() and not self._uses_windows_auth(),
             databases=self.selected_databases(),
             add_to_diagram=self.add_to_diagram.isChecked() and self.add_to_diagram.isEnabled(),
         )
