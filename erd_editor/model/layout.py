@@ -22,5 +22,6 @@ class Layout:
     positions: dict[TableRef, tuple[float, float]] = field(default_factory=dict)  # linke obere Ecke
     database_colors: dict[str, int] = field(default_factory=dict)  # Datenbankname → Palettenindex
     frames: dict[str, Frame] = field(default_factory=dict)  # von Hand aufgezogene Rahmen
+    schema_frames: dict[tuple[str, str], Frame] = field(default_factory=dict)  # (Datenbank, Schema) → Rahmen
     scale: float = 1.0  # Darstellungsgröße (1.0 = 100 %)
     notation: str = "crowsfoot"

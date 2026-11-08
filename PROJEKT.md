@@ -171,7 +171,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 
 ### Version 2
 - [x] PostgreSQL-Adapter
-- [ ] Schemas als innere Rechtecke (PostgreSQL, SQL Server)
+- [x] Schemas als innere Rechtecke (PostgreSQL, SQL Server)
 - [ ] SQL-Server-Adapter
 - [ ] Darstellungsoptionen: Datentypen ein/aus, nur Schlüsselspalten, Kommentare
 - [ ] Mehrere Teildiagramme pro Datenbank (z. B. „Bestellwesen“, „Personal“)

@@ -220,12 +220,16 @@ def _ref_from_dict(d: dict[str, Any]) -> TableRef:
 
 def _layout_to_dict(layout: Layout) -> dict[str, Any]:
     databases = []
-    for name in sorted(set(layout.database_colors) | set(layout.frames)):
+    schema_dbs = {db for db, _ in layout.schema_frames}
+    for name in sorted(set(layout.database_colors) | set(layout.frames) | schema_dbs):
         entry: dict[str, Any] = {"name": name}
         if name in layout.database_colors:
             entry["color"] = layout.database_colors[name]
         if name in layout.frames:
             entry["frame"] = [round(v, 1) for v in layout.frames[name]]
+        schemas = sorted((s, f) for (db, s), f in layout.schema_frames.items() if db == name)
+        if schemas:
+            entry["schemas"] = [{"name": s, "frame": [round(v, 1) for v in f]} for s, f in schemas]
         databases.append(entry)
     return {
         "notation": layout.notation,
@@ -248,6 +252,12 @@ def _layout_from_dict(d: dict[str, Any]) -> Layout:
         positions={_ref_from_dict(e): (float(e["x"]), float(e["y"])) for e in d.get("entities", [])},
         database_colors={db["name"]: int(db["color"]) for db in d.get("databases", []) if "color" in db},
         frames={db["name"]: _frame(db["frame"]) for db in d.get("databases", []) if db.get("frame")},
+        schema_frames={
+            (db["name"], s["name"]): _frame(s["frame"])
+            for db in d.get("databases", [])
+            for s in db.get("schemas", [])
+            if s.get("frame")
+        },
         scale=min(max(float(d.get("scale", 1.0)), MIN_SCALE), MAX_SCALE),
         notation=d.get("notation", "crowsfoot"),
     )

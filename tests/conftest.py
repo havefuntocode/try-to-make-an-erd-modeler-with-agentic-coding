@@ -170,3 +170,21 @@ def qapp():
     from PySide6.QtWidgets import QApplication
 
     return QApplication.instance() or QApplication([])
+
+
+def build_schema_test_diagram(database: str = "erd") -> Diagram:
+    """Testschema mit Schemaebene (wie PostgreSQL): eine Datenbank, Schemas `shop` und `stammdaten`."""
+    mysql = build_test_schema("shop", "stammdaten")
+    schemas = []
+    for db in mysql.databases:
+        tables = db.schemas[0].tables
+        for table in tables:
+            for fk in table.foreign_keys:
+                fk.referenced_table = TableRef(database, fk.referenced_table.database, fk.referenced_table.table)
+        schemas.append(Schema(db.name, tables))
+    return Diagram([Database(database, Dialect.POSTGRESQL, schemas)])
+
+
+@pytest.fixture
+def schema_diagram() -> Diagram:
+    return build_schema_test_diagram()

@@ -133,6 +133,22 @@ def route_avoiding(
             candidate = [start, QPointF(mid_x, start.y()), QPointF(mid_x, end.y()), end]
             if not path_hits(candidate, obstacles):
                 return candidate
+    else:
+        # U-Linie: senkrechtes Stück neben die Boxen im Weg legen
+        lo_y, hi_y = min(start.y(), end.y()), max(start.y(), end.y())
+        d = start_side.value
+        base = max(start.x(), end.x()) if d > 0 else min(start.x(), end.x())
+        blocking = [r for r in obstacles if r.bottom() >= lo_y and r.top() <= hi_y]
+        outs = sorted(
+            {(r.right() if d > 0 else r.left()) + d * (channel_gap + abs(offset)) for r in blocking},
+            key=lambda x: abs(x - base),
+        )
+        for out_x in outs:
+            if (out_x - base) * d < stub:  # Symbole brauchen ihr gerades Stück
+                continue
+            candidate = [start, QPointF(out_x, start.y()), QPointF(out_x, end.y()), end]
+            if not path_hits(candidate, obstacles):
+                return candidate
 
     # Kanal suchen: freie Höhen ober- und unterhalb der Boxen im Weg
     lo_x, hi_x = min(x1, x2), max(x1, x2)

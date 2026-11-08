@@ -60,6 +60,10 @@ class ContainerItem(QGraphicsObject):
     RADIUS = 10.0
     BORDER_WIDTH = 1.6
     GRIP = 8.0  # Breite der Anfasszone an den Kanten (Szeneneinheiten bei 100 %)
+    TITLE_PT = 11.0
+    INFO_PT = 8.5
+    BORDER_STYLE = Qt.PenStyle.SolidLine
+    Z = -2.0  # hinter Schemas (-1.5), Linien (-1) und Entitäten (0)
 
     def __init__(self, database: Database, colors: ContainerColors, color_index: int = 0, scale: float = 1.0) -> None:
         super().__init__()
@@ -67,13 +71,14 @@ class ContainerItem(QGraphicsObject):
         self.colors = colors
         self.color_index = color_index  # Palettenindex, wird im Layout gespeichert
         self.members: list[EntityItem] = []
+        self.schemas: list[ContainerItem] = []  # innere Rahmen (Schemas), nur bei Datenbanken
         self.manual_rect: QRectF | None = None  # von Hand aufgezogener Rahmen (Szenenkoordinaten)
         self._rect = QRectF()
         self._drag_last: QPointF | None = None
         self._resize_edge = Edge.NONE
         self._resize_start: tuple[QPointF, QRectF] | None = None
         self.set_scale(scale)
-        self.setZValue(-2)  # hinter Linien (-1) und Entitäten (0)
+        self.setZValue(self.Z)
         self.setAcceptHoverEvents(True)
         self.setToolTip(self._tooltip())
 
@@ -82,8 +87,8 @@ class ContainerItem(QGraphicsObject):
     def set_scale(self, scale: float) -> None:
         """Schrift und Abstände an die Darstellungsgröße anpassen."""
         self.scale_factor = scale
-        self.title_font = _font(11 * scale, bold=True)
-        self.info_font = _font(8.5 * scale)
+        self.title_font = _font(self.TITLE_PT * scale, bold=True)
+        self.info_font = _font(self.INFO_PT * scale)
         fm_title, fm_info = QFontMetricsF(self.title_font), QFontMetricsF(self.info_font)
         self._header_h = fm_title.height() + fm_info.height() + 12 * scale
         self.padding = self.PADDING * scale
@@ -91,6 +96,11 @@ class ContainerItem(QGraphicsObject):
         self.grip = self.GRIP * scale
 
     # ------------------------------------------------------------------ Texte
+
+    @property
+    def title(self) -> str:
+        """Erste Kopfzeile."""
+        return self.database.name
 
     @property
     def info_text(self) -> str:
@@ -126,9 +136,11 @@ class ContainerItem(QGraphicsObject):
         union = QRectF()
         for item in self.members:
             union = union.united(item.mapRectToScene(item.rect))
+        for schema in self.schemas:  # innere Rahmen samt Kopfzeile umschließen
+            union = union.united(schema.rect)
         p = self.padding
         rect = union.adjusted(-p, -p - self._header_h, p, p)
-        title_w = QFontMetricsF(self.title_font).horizontalAdvance(self.database.name)
+        title_w = QFontMetricsF(self.title_font).horizontalAdvance(self.title)
         info_w = QFontMetricsF(self.info_font).horizontalAdvance(self.info_text)
         min_w = max(title_w, info_w) + 2 * p
         if rect.width() < min_w:
@@ -199,7 +211,7 @@ class ContainerItem(QGraphicsObject):
         painter.drawText(
             QRectF(hr.left() + p, hr.top() + 4 * s, hr.width() - 2 * p, fm_title.height()),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            self.database.name,
+            self.title,
         )
         painter.setFont(self.info_font)
         painter.setPen(c.qcolor("border").darker(120))
@@ -210,7 +222,7 @@ class ContainerItem(QGraphicsObject):
             self.info_text,
         )
 
-        painter.setPen(QPen(c.qcolor("border"), self.BORDER_WIDTH * s))
+        painter.setPen(QPen(c.qcolor("border"), self.BORDER_WIDTH * s, self.BORDER_STYLE))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(outline)
 
