@@ -9,9 +9,9 @@ from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import replace
 
-from PySide6.QtCore import QPointF, QRectF, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QGraphicsScene
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneMouseEvent
 
 from erd_editor.analysis import ZERO_OR_MANY, derive_relationships
 from erd_editor.diagram.container_item import ContainerItem
@@ -38,6 +38,8 @@ class DiagramScene(QGraphicsScene):
     SCHEMA_EXTRA_GAP = 70.0  # zusätzlicher Abstand zwischen Datenbanken mit Schema-Rahmen
 
     layout_changed = Signal()  # Nutzer hat Positionen verändert
+    # Mausgeste abgeschlossen: Layout vorher, nachher, Beschreibung (für Rückgängig)
+    gesture_finished = Signal(object, object, str)
 
     def __init__(self, parent=None, notation: Notation | None = None) -> None:
         super().__init__(parent)
@@ -51,6 +53,7 @@ class DiagramScene(QGraphicsScene):
         self._routing_suspended = False
         self.display_scale = 1.0  # Darstellungsgröße (1.0 = 100 %)
         self.display_options = DisplayOptions()
+        self._gesture_before: Layout | None = None
         self.selectionChanged.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------ Aufbau
@@ -303,6 +306,58 @@ class DiagramScene(QGraphicsScene):
                 frame.manual_rect = QRectF(x, y, r.width() * ratio, r.height() * ratio)
         self._set_positions(positions)
         self.layout_changed.emit()
+
+    # ------------------------------------------------------------------ Rückgängig/Wiederholen
+
+    def restore_layout(self, layout: Layout) -> None:
+        """Layout-Zustand wiederherstellen, ohne die Szene neu aufzubauen.
+
+        Setzt Darstellungsgröße, Darstellungsoptionen, Positionen und
+        Rahmen. Farben bleiben unverändert (sie ändern sich nur mit dem Schema).
+        """
+        if abs(layout.scale - self.display_scale) > 1e-9:
+            self.display_scale = layout.scale
+            for item in self.entities.values():
+                item.setScale(layout.scale)
+            for rel in self.relations:
+                rel.scale_factor = layout.scale
+            for frame in self.frames():
+                frame.set_scale(layout.scale)
+        if layout.display != self.display_options:
+            self.display_options = layout.display
+            for item in self.entities.values():
+                item.set_options(layout.display)
+        for name, container in self.containers.items():
+            frame = layout.frames.get(name)
+            container.manual_rect = QRectF(*frame) if frame else None
+        for key, schema in self.schema_items.items():
+            frame = layout.schema_frames.get(key)
+            schema.manual_rect = QRectF(*frame) if frame else None
+        self._set_positions({ref: pos for ref, pos in layout.positions.items() if ref in self.entities})
+
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._gesture_before = self.current_layout()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() != Qt.MouseButton.LeftButton or self._gesture_before is None:
+            return
+        before, self._gesture_before = self._gesture_before, None
+        after = self.current_layout()
+        if after != before:
+            self.gesture_finished.emit(before, after, self.describe_change(before, after))
+
+    @staticmethod
+    def describe_change(before: Layout, after: Layout) -> str:
+        """Kurzer Text für das Menü „Rückgängig: …“."""
+        if after.positions != before.positions:
+            moved = [ref for ref, pos in after.positions.items() if before.positions.get(ref) != pos]
+            return f"„{moved[0].table}“ verschieben" if len(moved) == 1 else f"{len(moved)} Tabellen verschieben"
+        if after.frames != before.frames or after.schema_frames != before.schema_frames:
+            return "Rahmen aufziehen"
+        return "Layout ändern"
 
     # ------------------------------------------------------------------ Darstellungsoptionen
 

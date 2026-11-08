@@ -15,7 +15,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QDate, QLibraryInfo, QLocale, QTimer, QTranslator
 from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -33,6 +33,7 @@ from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, exp
 from erd_editor.export.render import page_layout
 from erd_editor.model import ColumnMode, ConnectionProfile, Database, Diagram, Dialect
 from erd_editor.persistence import credentials
+from erd_editor.ui.commands import DocumentCommand, LayoutCommand
 from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory, needs_password
 from erd_editor.persistence.document import (
     FILE_SUFFIX,
@@ -101,6 +102,10 @@ class MainWindow(QMainWindow):
         self.adapter_factory = default_adapter_factory  # in Tests austauschbar
         self.path: Path | None = None
         self.scene.layout_changed.connect(lambda: self.setWindowModified(True))
+        self.undo_stack = QUndoStack(self)
+        self.undo_stack.setUndoLimit(200)
+        self.undo_stack.cleanChanged.connect(self._on_clean_changed)
+        self.scene.gesture_finished.connect(self._push_gesture)
         self._create_menus()
         self._update_title()
         self.statusBar().showMessage(USAGE_HINT)
@@ -131,9 +136,18 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self._action("&Beenden", self.close, QKeySequence.StandardKey.Quit))
 
+        edit_menu = self.menuBar().addMenu("&Bearbeiten")
+        undo_action = self.undo_stack.createUndoAction(self, "&Rückgängig")
+        undo_action.setShortcuts(QKeySequence.StandardKey.Undo)
+        redo_action = self.undo_stack.createRedoAction(self, "&Wiederholen")
+        redo_action.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+        edit_menu.addAction(undo_action)
+        edit_menu.addAction(redo_action)
+        self.undo_action, self.redo_action = undo_action, redo_action
+
         layout_menu = self.menuBar().addMenu("A&nordnen")
         layout_menu.addAction(self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L")))
-        layout_menu.addAction(self._action("&Rahmen an Inhalt anpassen", self.scene.fit_frames_to_content))
+        layout_menu.addAction(self._action("&Rahmen an Inhalt anpassen", self.fit_frames))
 
         view_menu = self.menuBar().addMenu("&Ansicht")
         view_menu.addAction(self._action("Vergrößern", self.view.zoom_in, [QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+=")]))
@@ -192,7 +206,9 @@ class MainWindow(QMainWindow):
         if self._syncing_menu:
             return
         options = replace(self.scene.display_options, **changes)
-        overlaps = self.scene.set_display_options(options)
+        result: list[bool] = []
+        self.record_layout("Darstellung ändern", lambda: result.append(self.scene.set_display_options(options)))
+        overlaps = bool(result and result[0])
         self._sync_display_menu()
         if overlaps:
             self.statusBar().showMessage("Einige Boxen überlappen jetzt – Anordnen → Automatisch anordnen (Strg+L)")
@@ -214,7 +230,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ Darstellungsgröße
 
     def set_display_scale(self, factor: float) -> None:
-        self.scene.set_display_scale(factor)
+        self.record_layout(f"Darstellungsgröße {round(factor * 100)} %", lambda: self.scene.set_display_scale(factor))
         self._sync_scale_menu()
         self.view.zoom_to_fit()
         self.statusBar().showMessage(f"Darstellungsgröße {round(self.scene.display_scale * 100)} %")
@@ -238,12 +254,55 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{name}[*] – {APP_NAME}")
 
     def _auto_layout(self) -> None:
-        self.scene.auto_layout()
+        self.record_layout("Automatisch anordnen", self.scene.auto_layout)
         self.view.zoom_to_fit()
+
+    def fit_frames(self) -> None:
+        self.record_layout("Rahmen an Inhalt anpassen", self.scene.fit_frames_to_content)
+
+    # ------------------------------------------------------------------ Rückgängig/Wiederholen
+
+    def record_layout(self, text: str, action) -> None:
+        """Layout-Aktion ausführen und als ein Schritt auf den Rückgängig-Stapel legen."""
+        before = self.scene.current_layout()
+        action()
+        after = self.scene.current_layout()
+        if after != before:
+            self.undo_stack.push(LayoutCommand(self.scene, before, after, text, self._sync_menus))
+
+    def _push_gesture(self, before, after, text: str) -> None:
+        """Mausgeste der Szene (Verschieben, Rahmen aufziehen) als ein Schritt."""
+        self.undo_stack.push(LayoutCommand(self.scene, before, after, text, self._sync_menus))
+
+    def _record_document(self, before: DiagramDocument, text: str) -> None:
+        """Schema-Änderung (bereits angezeigt) als ein Schritt ablegen."""
+        after = DiagramDocument(self.document.diagram, self.scene.current_layout(), list(self.document.connections))
+        self.undo_stack.push(DocumentCommand(self._restore_document, before, after, text))
+
+    def _snapshot(self) -> DiagramDocument:
+        return DiagramDocument(self.document.diagram, self.scene.current_layout(), list(self.document.connections))
+
+    def _restore_document(self, document: DiagramDocument) -> None:
+        self.document = DiagramDocument(document.diagram, document.layout, list(document.connections))
+        self.scene.load(document.diagram, document.layout)
+        self._sync_menus()
+
+    def _sync_menus(self) -> None:
+        self._sync_scale_menu()
+        self._sync_display_menu()
+
+    def _on_clean_changed(self, clean: bool) -> None:
+        """Sternchen im Titel: ungespeichert, solange der Stapel nicht am gespeicherten Stand ist.
+
+        Ein noch nie gespeichertes Diagramm mit Inhalt gilt immer als geändert.
+        """
+        never_saved = self.path is None and bool(self.scene.entities)
+        self.setWindowModified(not clean or never_saved)
 
     # ------------------------------------------------------------------ Anzeigen
 
     def show_document(self, document: DiagramDocument, use_layout: bool) -> None:
+        self.undo_stack.clear()  # neues Dokument: nichts mehr rückgängig zu machen
         self.document = document
         self.scene.load(document.diagram, document.layout if use_layout else None)
         self._sync_scale_menu()
@@ -336,6 +395,7 @@ class MainWindow(QMainWindow):
             self._update_title()
             self.setWindowModified(True)
             return
+        before = self._snapshot()
         old = self.document.diagram
         fresh = {db.name: db for db in databases}
         merged = [fresh.pop(db.name, db) for db in old.databases] + list(fresh.values())
@@ -344,6 +404,7 @@ class MainWindow(QMainWindow):
         layout = self.scene.current_layout()
         self.document = DiagramDocument(new_diagram, layout, connections)
         self.scene.load(new_diagram, layout)
+        self._record_document(before, "Datenbanken hinzufügen")
         self.statusBar().showMessage(describe_changes(old, new_diagram))
         self.setWindowModified(True)
         QTimer.singleShot(0, self.view.zoom_to_fit)
@@ -379,9 +440,11 @@ class MainWindow(QMainWindow):
 
         # Reihenfolge beibehalten; Datenbanken ohne Profil bleiben unverändert
         new_diagram = Diagram([fresh.get(db.name, db) for db in old.databases])
+        before = self._snapshot()
         layout = self.scene.current_layout()
         self.document = DiagramDocument(new_diagram, layout, self.document.connections)
         self.scene.load(new_diagram, layout)
+        self._record_document(before, "Neu einlesen")
         self.statusBar().showMessage(describe_changes(old, new_diagram))
         self.setWindowModified(True)
 
@@ -427,6 +490,7 @@ class MainWindow(QMainWindow):
             return False
         self.path = path
         self._update_title()
+        self.undo_stack.setClean()
         self.setWindowModified(False)
         self.statusBar().showMessage(f"Gespeichert: {path}")
         return True

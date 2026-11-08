@@ -176,7 +176,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [x] Darstellungsoptionen: Datentypen ein/aus, nur Schlüsselspalten, Kommentare (dazu: keine Spalten, Indexbereich)
 - [ ] Mehrere Teildiagramme pro Datenbank (z. B. „Bestellwesen“, „Personal“)
 - [ ] Export SVG (PNG ist in Version 1 vorgezogen)
-- [ ] Undo/Redo (`QUndoStack`) – zunächst für Layout-Aktionen, Fundament für Version 3
+- [x] Undo/Redo (`QUndoStack`) – Layout-Aktionen, Neu einlesen, Datenbanken hinzufügen; Fundament für Version 3
 - [ ] Manuelle Überschreibungen (schwache Entität, Mindestkardinalität)
 - [ ] Weitere Notationen ((min,max), IDEF1X) – UML bewusst nicht
 
