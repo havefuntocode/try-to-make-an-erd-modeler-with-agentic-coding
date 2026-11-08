@@ -24,7 +24,7 @@ from erd_editor.diagram.style import EntityStyle
 from erd_editor.layout import LayoutNode, LayoutOptions, layered_layout
 from erd_editor.model import Diagram, DisplayOptions, Layout, TableRef
 from erd_editor.model.layout import MAX_SCALE, MIN_SCALE
-from erd_editor.notation import CrowsFootNotation, Notation
+from erd_editor.notation import CrowsFootNotation, Notation, notation_for
 
 Position = tuple[float, float]
 
@@ -83,6 +83,8 @@ class DiagramScene(QGraphicsScene):
         self.diagram = diagram
         self.overrides = dict(overrides or {})
         if layout is not None:
+            if layout.notation != self.notation.key:
+                self.notation = notation_for(layout.notation)
             self.display_scale = min(max(layout.scale, MIN_SCALE), MAX_SCALE)
             self.display_options = layout.display
         base_style = style or EntityStyle()
@@ -136,6 +138,32 @@ class DiagramScene(QGraphicsScene):
             item.scale_factor = self.display_scale
             self.addItem(item)
             self.relations.append(item)
+        self._apply_entity_corners()
+
+    def _apply_entity_corners(self) -> None:
+        """IDEF1X: abhängige Entitäten (Kind einer identifizierenden Beziehung) rund, sonst eckig."""
+        distinguish = self.notation.distinguishes_dependent_entities
+        dependent = {
+            r.relationship.child for r in self.relations
+            if r.relationship.identifying and r.relationship.child != r.relationship.parent
+        }
+        for ref, item in self.entities.items():
+            item.set_square_corners(distinguish and ref not in dependent)
+
+    def set_notation(self, key: str) -> None:
+        """Notation wechseln (Krähenfuß, (min,max), IDEF1X)."""
+        if key == self.notation.key:
+            return
+        self._switch_notation(key)
+        self.layout_changed.emit()
+
+    def _switch_notation(self, key: str) -> None:
+        self.notation = notation_for(key)
+        for item in self.relations:
+            item.prepareGeometryChange()
+            item.notation = self.notation
+        self._apply_entity_corners()
+        self.update_relations()
 
     def set_overrides(self, overrides: dict[RelationshipKey, RelationshipOverride]) -> None:
         """Manuelle Überschreibungen ändern; Linien werden neu aufgebaut."""
@@ -185,7 +213,7 @@ class DiagramScene(QGraphicsScene):
             },
             scale=self.display_scale,
             display=self.display_options,
-            notation="crowsfoot",
+            notation=self.notation.key,
         )
 
     # ------------------------------------------------------------------ Anordnen
@@ -356,6 +384,8 @@ class DiagramScene(QGraphicsScene):
                 rel.scale_factor = layout.scale
             for frame in self.frames():
                 frame.set_scale(layout.scale)
+        if layout.notation != self.notation.key:
+            self._switch_notation(layout.notation)
         if layout.display != self.display_options:
             self.display_options = layout.display
             for item in self.entities.values():

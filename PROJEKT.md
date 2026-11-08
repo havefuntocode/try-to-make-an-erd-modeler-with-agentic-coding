@@ -178,7 +178,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [x] Export SVG (PNG ist in Version 1 vorgezogen)
 - [x] Undo/Redo (`QUndoStack`) – Layout-Aktionen, Neu einlesen, Datenbanken hinzufügen; Fundament für Version 3
 - [x] Manuelle Überschreibungen (schwache Entität, Mindestkardinalität) per Rechtsklick auf die Linie
-- [ ] Weitere Notationen ((min,max), IDEF1X) – UML bewusst nicht
+- [x] Weitere Notationen ((min,max), IDEF1X) – UML bewusst nicht
 
 ### Version 3 – Modellieren
 Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.

@@ -81,6 +81,7 @@ class EntityItem(QGraphicsObject):
         self.table = table
         self.style = style or EntityStyle()
         self.options = options or DisplayOptions()
+        self.square_corners = False  # IDEF1X: unabhängige Entitäten eckig
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
@@ -197,8 +198,15 @@ class EntityItem(QGraphicsObject):
 
     def _outline(self) -> QPainterPath:
         path = QPainterPath()
-        path.addRoundedRect(self._rect, self.style.radius, self.style.radius)
+        radius = 0.0 if self.square_corners else self.style.radius
+        path.addRoundedRect(self._rect, radius, radius)
         return path
+
+    def set_square_corners(self, square: bool) -> None:
+        if square != self.square_corners:
+            self.prepareGeometryChange()
+            self.square_corners = square
+            self.update()
 
     def column_anchor_y(self, column_name: str) -> float | None:
         """Vertikale Mitte einer sichtbaren Spaltenzeile (Item-Koordinaten) – Andockpunkt für Beziehungen.

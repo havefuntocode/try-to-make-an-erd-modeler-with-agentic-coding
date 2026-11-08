@@ -32,7 +32,7 @@ erd_editor/
   adapters/       # base.py, mysql.py, postgres.py, mssql.py
   analysis/       # Kardinalitäten, identifizierende Beziehungen
   diagram/        # Scene, EntityItem, ContainerItem, RelationItem
-  notation/       # base.py, crowsfoot.py
+  notation/       # base.py, crowsfoot.py, minmax.py, idef1x.py
   layout/         # Auto-Layout
   persistence/    # Laden/Speichern (JSON)
   export/         # Drucken, PDF, PNG, SVG

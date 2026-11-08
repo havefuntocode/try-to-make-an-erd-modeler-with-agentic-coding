@@ -33,6 +33,7 @@ from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
 from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, export_png, export_svg, print_scene
 from erd_editor.export.render import page_layout
+from erd_editor.notation import NOTATIONS
 from erd_editor.model import ColumnMode, ConnectionProfile, Database, Diagram, Dialect, Layout
 from erd_editor.persistence import credentials
 from erd_editor.ui.commands import DocumentCommand, LayoutCommand
@@ -186,6 +187,18 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
         size_menu.addAction(self._action("Größer", lambda: self.step_display_scale(+1), QKeySequence("Ctrl+Shift++")))
         size_menu.addAction(self._action("Kleiner", lambda: self.step_display_scale(-1), QKeySequence("Ctrl+Shift+-")))
         self._sync_scale_menu()
+
+        # Notation der Linienenden
+        view_menu.addSeparator()
+        notation_menu = view_menu.addMenu("&Notation")
+        self.notation_group = QActionGroup(self)
+        self.notation_actions: dict[str, QAction] = {}
+        for key, cls in NOTATIONS.items():
+            action = QAction(cls.name, self, checkable=True)
+            action.triggered.connect(lambda checked, k=key: self.set_notation(k))
+            self.notation_group.addAction(action)
+            notation_menu.addAction(action)
+            self.notation_actions[key] = action
 
         # Darstellungsoptionen: was die Boxen zeigen
         view_menu.addSeparator()
@@ -357,6 +370,16 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
     def _sync_menus(self) -> None:
         self._sync_scale_menu()
         self._sync_display_menu()
+        self._sync_notation_menu()
+
+    def set_notation(self, key: str) -> None:
+        self.record_layout(f"Notation {NOTATIONS[key].name}", lambda: self.scene.set_notation(key))
+        self._sync_notation_menu()
+        self.statusBar().showMessage(f"Notation: {NOTATIONS[key].name}")
+
+    def _sync_notation_menu(self) -> None:
+        for key, action in self.notation_actions.items():
+            action.setChecked(key == self.scene.notation.key)
 
     def _on_clean_changed(self, clean: bool) -> None:
         """Sternchen im Titel: ungespeichert, solange der Stapel nicht am gespeicherten Stand ist.
@@ -372,7 +395,8 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
         self.undo_stack.clear()  # neues Dokument: nichts mehr rückgängig zu machen
         self.document = document
         if not use_layout:  # neu eingelesen: automatisch anordnen, Größe und Optionen der Sitzung behalten
-            document.layout = Layout(scale=self.scene.display_scale, display=self.scene.display_options)
+            document.layout = Layout(scale=self.scene.display_scale, display=self.scene.display_options,
+                                     notation=self.scene.notation.key)
         self.current_view = None
         self.show_view(None)
         problems = document.diagram.validate()

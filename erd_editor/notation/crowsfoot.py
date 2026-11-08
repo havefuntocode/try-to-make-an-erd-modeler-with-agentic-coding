@@ -14,6 +14,7 @@ from erd_editor.notation.base import Notation
 
 
 class CrowsFootNotation(Notation):
+    key = "crowsfoot"
     name = "Krähenfuß"
 
     FOOT_LENGTH = 12.0  # Länge des Krähenfußes entlang der Linie
@@ -29,7 +30,15 @@ class CrowsFootNotation(Notation):
     def end_width(self) -> float:
         return self.HALF_WIDTH
 
-    def draw_end(self, painter: QPainter, tip: QPointF, direction: QPointF, cardinality: Cardinality) -> None:
+    def draw_end(
+        self,
+        painter: QPainter,
+        tip: QPointF,
+        direction: QPointF,
+        cardinality: Cardinality,
+        opposite: Cardinality | None = None,
+        at_child: bool = True,
+    ) -> None:
         normal = QPointF(-direction.y(), direction.x())
 
         def at(distance: float, offset: float = 0.0) -> QPointF:

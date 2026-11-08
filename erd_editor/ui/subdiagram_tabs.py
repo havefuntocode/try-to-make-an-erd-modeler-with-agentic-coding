@@ -107,7 +107,7 @@ class SubdiagramTabsMixin:
             colors = self.main_colors()
             if sd.layout is None:  # erstes Anzeigen: automatisch, aber mit Größe/Optionen von „Gesamt“
                 main = self.document.layout
-                start = Layout(database_colors=colors, scale=main.scale, display=main.display)
+                start = Layout(database_colors=colors, scale=main.scale, display=main.display, notation=main.notation)
             else:
                 start = replace(sd.layout, database_colors=colors)
             self.scene.load(filter_diagram(self.document.diagram, sd.tables), start, overrides=self.document.overrides)

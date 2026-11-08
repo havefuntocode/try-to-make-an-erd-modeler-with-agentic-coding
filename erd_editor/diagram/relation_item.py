@@ -91,17 +91,18 @@ class RelationItem(QGraphicsItem):
 
         rel = self.relationship
         # Am Kind steht, wie viele Kinder ein Elternteil hat – und umgekehrt
-        self._draw_end(painter, color, self.points[0], self.child_side, rel.child_end)
-        self._draw_end(painter, color, self.points[-1], self.parent_side, rel.parent_end)
+        self._draw_end(painter, color, self.points[0], self.child_side, rel.child_end, rel.parent_end, True)
+        self._draw_end(painter, color, self.points[-1], self.parent_side, rel.parent_end, rel.child_end, False)
 
-    def _draw_end(self, painter: QPainter, color: QColor, tip: QPointF, side: Side, cardinality) -> None:
+    def _draw_end(self, painter: QPainter, color: QColor, tip: QPointF, side: Side,
+                  cardinality, opposite, at_child: bool) -> None:
         """Symbol in Einheitsgröße zeichnen und per Transformation skalieren."""
         painter.save()
         painter.translate(tip)
         painter.scale(self.scale_factor, self.scale_factor)
         painter.setPen(QPen(color, self.HIGHLIGHT_WIDTH if self.highlighted else self.LINE_WIDTH))
         painter.setBrush(SYMBOL_FILL)
-        self.notation.draw_end(painter, QPointF(0, 0), side.direction, cardinality)
+        self.notation.draw_end(painter, QPointF(0, 0), side.direction, cardinality, opposite, at_child)
         painter.restore()
 
     # ------------------------------------------------------------------ Tooltip
