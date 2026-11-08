@@ -1,4 +1,4 @@
-"""Drucken, PDF- und PNG-Export der Diagrammszene.
+"""Drucken, PDF-, PNG- und SVG-Export der Diagrammszene.
 
 Alle Ziele nutzen dieselbe Zeichenroutine: weißer Hintergrund, ohne
 Auswahl-Hervorhebung, Diagramm seitenfüllend mit Rand. Vektorausgabe
@@ -14,6 +14,7 @@ from enum import Enum
 
 from PySide6.QtCore import QMarginsF, QRectF, QSize, QSizeF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPageLayout, QPageSize, QPainter, QPdfWriter
+from PySide6.QtSvg import QSvgGenerator
 from PySide6.QtWidgets import QGraphicsScene
 
 MARGIN = 24.0  # Rand um das Diagramm in Szeneneinheiten
@@ -140,6 +141,35 @@ def export_png(scene: QGraphicsScene, path: str, factor: float = 2.0) -> QSize:
         painter.end()
     if not image.save(path, "PNG"):
         raise OSError(f"PNG konnte nicht gespeichert werden: {path}")
+    return size
+
+
+# ---------------------------------------------------------------------- SVG
+
+
+def export_svg(scene: QGraphicsScene, path: str, title: str = "") -> QSize:
+    """Diagramm als SVG speichern (Vektorgrafik mit echtem Text).
+
+    Eine Szeneneinheit entspricht einem SVG-Pixel; Programme wie Word,
+    LibreOffice oder Inkscape können das Bild verlustfrei skalieren.
+    """
+    source = diagram_rect(scene)
+    size = QSize(max(1, round(source.width())), max(1, round(source.height())))
+    generator = QSvgGenerator()
+    generator.setFileName(path)
+    generator.setSize(size)
+    generator.setViewBox(QRectF(0, 0, size.width(), size.height()))
+    generator.setResolution(96)
+    generator.setTitle(title or "ER-Diagramm")
+    generator.setDescription("Erstellt mit dem ER-Diagramm-Editor")
+    painter = QPainter(generator)
+    if not painter.isActive():
+        raise OSError(f"SVG konnte nicht geschrieben werden: {path}")
+    try:
+        painter.fillRect(QRectF(0, 0, size.width(), size.height()), WHITE)
+        paint_page(painter, QRectF(0, 0, size.width(), size.height()), scene)
+    finally:
+        painter.end()
     return size
 
 

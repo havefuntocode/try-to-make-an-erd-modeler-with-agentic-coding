@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from erd_editor.adapters.base import AdapterError
 from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
-from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, export_png, print_scene
+from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, export_png, export_svg, print_scene
 from erd_editor.export.render import page_layout
 from erd_editor.model import ColumnMode, ConnectionProfile, Database, Diagram, Dialect, Layout
 from erd_editor.persistence import credentials
@@ -135,6 +135,7 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
         file_menu.addAction(self._action("&Drucken …", self.print_dialog, QKeySequence.StandardKey.Print))
         file_menu.addAction(self._action("Als &PDF exportieren …", self.export_pdf_dialog, QKeySequence("Ctrl+Shift+P")))
         file_menu.addAction(self._action("Als P&NG exportieren …", self.export_png_dialog, QKeySequence("Ctrl+Shift+E")))
+        file_menu.addAction(self._action("Als S&VG exportieren …", self.export_svg_dialog, QKeySequence("Ctrl+Shift+G")))
         file_menu.addSeparator()
         file_menu.addAction(self._action("&Beenden", self.close, QKeySequence.StandardKey.Quit))
 
@@ -560,6 +561,21 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
             QMessageBox.critical(self, "Export fehlgeschlagen", str(exc))
             return
         self.statusBar().showMessage(f"PNG gespeichert ({size.width()} × {size.height()} Pixel): {path}")
+
+    def export_svg_dialog(self) -> None:
+        if not self._has_content():
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Als SVG exportieren", str(self._export_path(".svg")), "SVG-Grafik (*.svg)")
+        if not path:
+            return
+        path = path if path.lower().endswith(".svg") else path + ".svg"
+        title = self.footer_text().rsplit(" · ", 1)[0]  # Datei und Ansicht, ohne Datum
+        try:
+            size = export_svg(self.scene, path, title)
+        except OSError as exc:
+            QMessageBox.critical(self, "Export fehlgeschlagen", str(exc))
+            return
+        self.statusBar().showMessage(f"SVG gespeichert ({size.width()} × {size.height()}): {path}")
 
     def _dialog_dir(self) -> Path:
         return self.path.parent if self.path else Path.cwd()

@@ -169,3 +169,40 @@ class TestMainWindowExport:
         window.path = Path(tmp_path / "shop.erd.json")
         assert window.footer_text().startswith("shop.erd.json · ")
         assert window._export_path(".pdf").name == "shop.pdf"
+
+
+class TestSvg:
+    def test_writes_vector_svg_with_text(self, scene, tmp_path):
+        from erd_editor.export import export_svg
+
+        path = tmp_path / "d.svg"
+        size = export_svg(scene, str(path), "Test")
+        text = path.read_text(encoding="utf-8")
+        assert text.lstrip().startswith("<?xml") and "<svg" in text
+        assert "kunde" in text and "bestellposition" in text  # echter Text, kein Bild
+        assert "<image" not in text  # Icons als Vektoren, nicht als Rasterbild
+        r = diagram_rect(scene)
+        assert (size.width(), size.height()) == (round(r.width()), round(r.height()))
+        assert f'width="{size.width()}' in text or "viewBox" in text
+
+    def test_selection_restored(self, scene, tmp_path):
+        from erd_editor.export import export_svg
+
+        item = scene.entities[TableRef("shop", None, "kunde")]
+        item.setSelected(True)
+        export_svg(scene, str(tmp_path / "d.svg"))
+        assert item.isSelected()
+
+    def test_menu_flow(self, qapp, test_schema, tmp_path, monkeypatch):
+        from PySide6.QtWidgets import QFileDialog
+
+        from erd_editor.main import MainWindow
+
+        w = MainWindow()
+        w.load_diagram(test_schema)
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(tmp_path / "bild"), ""))
+        w.export_svg_dialog()
+        assert (tmp_path / "bild.svg").exists()
+        assert "SVG gespeichert" in w.statusBar().currentMessage()
+        w.setWindowModified(False)
+        w.close()

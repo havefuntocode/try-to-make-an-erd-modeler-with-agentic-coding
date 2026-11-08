@@ -175,7 +175,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [x] SQL-Server-Adapter (Windows-Anmeldung oder SQL-Login)
 - [x] Darstellungsoptionen: Datentypen ein/aus, nur Schlüsselspalten, Kommentare (dazu: keine Spalten, Indexbereich)
 - [x] Mehrere Teildiagramme (z. B. „Bestellwesen“, „Personal“) als Reiter mit eigenem Layout
-- [ ] Export SVG (PNG ist in Version 1 vorgezogen)
+- [x] Export SVG (PNG ist in Version 1 vorgezogen)
 - [x] Undo/Redo (`QUndoStack`) – Layout-Aktionen, Neu einlesen, Datenbanken hinzufügen; Fundament für Version 3
 - [ ] Manuelle Überschreibungen (schwache Entität, Mindestkardinalität)
 - [ ] Weitere Notationen ((min,max), IDEF1X) – UML bewusst nicht
