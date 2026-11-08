@@ -1,6 +1,6 @@
 """Neutrales Datenmodell (dataclasses, ohne Qt)."""
 
-from erd_editor.model.layout import Layout
+from erd_editor.model.layout import ColumnMode, DisplayOptions, Layout
 from erd_editor.model.schema import (
     Column,
     ConnectionProfile,
@@ -17,10 +17,12 @@ from erd_editor.model.schema import (
 
 __all__ = [
     "Column",
+    "ColumnMode",
     "ConnectionProfile",
     "Database",
     "Diagram",
     "Dialect",
+    "DisplayOptions",
     "ForeignKey",
     "Index",
     "IndexKind",

@@ -22,7 +22,7 @@ from erd_editor.diagram.routing import Side, choose_sides, place, route_avoiding
 from erd_editor.diagram.schema_item import SchemaItem
 from erd_editor.diagram.style import EntityStyle
 from erd_editor.layout import LayoutNode, LayoutOptions, layered_layout
-from erd_editor.model import Diagram, Layout, TableRef
+from erd_editor.model import Diagram, DisplayOptions, Layout, TableRef
 from erd_editor.model.layout import MAX_SCALE, MIN_SCALE
 from erd_editor.notation import CrowsFootNotation, Notation
 
@@ -50,6 +50,7 @@ class DiagramScene(QGraphicsScene):
         self.diagram: Diagram | None = None
         self._routing_suspended = False
         self.display_scale = 1.0  # Darstellungsgröße (1.0 = 100 %)
+        self.display_options = DisplayOptions()
         self.selectionChanged.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------ Aufbau
@@ -70,6 +71,7 @@ class DiagramScene(QGraphicsScene):
         self.diagram = diagram
         if layout is not None:
             self.display_scale = min(max(layout.scale, MIN_SCALE), MAX_SCALE)
+            self.display_options = layout.display
         base_style = style or EntityStyle()
         colors_by_db = self._assign_colors(diagram, layout.database_colors if layout else {})
         for database in diagram.databases:
@@ -89,7 +91,7 @@ class DiagramScene(QGraphicsScene):
                     container.schemas.append(schema_item)
                 for table in schema.tables:
                     ref = TableRef(database.name, schema.name, table.name)
-                    item = EntityItem(ref, table, db_style)
+                    item = EntityItem(ref, table, db_style, self.display_options)
                     item.setScale(self.display_scale)
                     self.addItem(item)
                     self.entities[ref] = item
@@ -146,6 +148,7 @@ class DiagramScene(QGraphicsScene):
                 k: self._frame_tuple(s.manual_rect) for k, s in self.schema_items.items() if s.manual_rect is not None
             },
             scale=self.display_scale,
+            display=self.display_options,
             notation="crowsfoot",
         )
 
@@ -300,6 +303,35 @@ class DiagramScene(QGraphicsScene):
                 frame.manual_rect = QRectF(x, y, r.width() * ratio, r.height() * ratio)
         self._set_positions(positions)
         self.layout_changed.emit()
+
+    # ------------------------------------------------------------------ Darstellungsoptionen
+
+    def set_display_options(self, options: DisplayOptions) -> bool:
+        """Spalten, Datentypen, Indexe, Kommentare ein-/ausblenden.
+
+        Positionen bleiben erhalten. Liefert True, wenn sich danach Boxen
+        überlappen (dann hilft „Automatisch anordnen“).
+        """
+        if options == self.display_options:
+            return False
+        self.display_options = options
+        for item in self.entities.values():
+            item.set_options(options)
+        self.update_containers()
+        self.update_relations()
+        self.layout_changed.emit()
+        return self.has_overlaps()
+
+    def has_overlaps(self) -> bool:
+        """Überlappen sich zwei Boxen?"""
+        rects = sorted((item.mapRectToScene(item.rect) for item in self.entities.values()), key=lambda r: r.left())
+        for i, a in enumerate(rects):
+            for b in rects[i + 1 :]:
+                if b.left() >= a.right():
+                    break  # nach links sortiert: keine weiteren Kandidaten
+                if a.intersects(b):
+                    return True
+        return False
 
     # ------------------------------------------------------------------ Behälter
 

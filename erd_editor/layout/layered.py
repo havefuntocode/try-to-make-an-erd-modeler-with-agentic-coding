@@ -40,6 +40,7 @@ class LayoutOptions:
     ordering_sweeps: int = 8
     alignment_rounds: int = 6
     isolated_columns: int = 4  # Mindestspaltenzahl im Raster für Tabellen ohne Beziehungen
+    aspect_ratio: float = 1.6  # angestrebtes Verhältnis Breite:Höhe einer Gruppe (Querformat)
 
 
 Position = tuple[float, float]  # linke obere Ecke
@@ -103,24 +104,40 @@ def _layout_group(
     ]
     components.sort(key=lambda c: (-len(c), order[c[0]]))
 
+    # Komponenten einzeln anordnen, dann zeilenweise auf eine Zielbreite verteilen
+    blocks = [_layout_component(graph.subgraph(c), c, sizes, order, opt) for c in components]
+    target = _target_width(members, [w for _, w, _ in blocks], opt)
+
     positions: dict[Hashable, Position] = {}
-    y = 0.0
-    width = 0.0
-    for component in components:
-        comp_pos, comp_w, comp_h = _layout_component(graph.subgraph(component), component, sizes, order, opt)
+    x = y = row_h = 0.0
+    for comp_pos, comp_w, comp_h in blocks:
+        if x > 0 and x + comp_w > target:  # neue Zeile
+            x, y, row_h = 0.0, y + row_h + opt.component_gap, 0.0
         for key, (px, py) in comp_pos.items():
-            positions[key] = (px, py + y)
-        y += comp_h + opt.component_gap
-        width = max(width, comp_w)
+            positions[key] = (px + x, py + y)
+        x += comp_w + opt.component_gap
+        row_h = max(row_h, comp_h)
+    y += row_h
 
     if isolated:
-        grid_pos, grid_h = _grid(isolated, width, opt)
+        if blocks:
+            y += opt.component_gap
+        grid_pos, grid_h = _grid(isolated, target, opt)
         for key, (px, py) in grid_pos.items():
             positions[key] = (px, py + y)
         y += grid_h
-    else:
-        y -= opt.component_gap if components else 0.0
     return positions, max(y, 0.0)
+
+
+def _target_width(members: list[LayoutNode], component_widths: list[float], opt: LayoutOptions) -> float:
+    """Zielbreite einer Gruppe für ein Seitenverhältnis von etwa `aspect_ratio`.
+
+    Grundlage ist die Gesamtfläche aller Boxen samt Abständen; die breiteste
+    Komponente wird nie umgebrochen.
+    """
+    gap = opt.component_gap
+    area = sum((n.width + gap) * (n.height + gap) for n in members)
+    return max([math.sqrt(area * opt.aspect_ratio), *component_widths])
 
 
 # ---------------------------------------------------------------------- Komponente
@@ -233,17 +250,19 @@ def _resolve_overlaps(column: list, desired: list[float], sizes: dict, gap: floa
 
 
 def _grid(nodes: list[LayoutNode], available_width: float, opt: LayoutOptions) -> tuple[dict[Hashable, Position], float]:
-    """Tabellen ohne Beziehungen zeilenweise anordnen."""
-    widest = max(n.width for n in nodes)
-    per_row = max(opt.isolated_columns, int(available_width // (widest + opt.row_gap)) if available_width else 0)
-    per_row = min(per_row, max(1, math.ceil(math.sqrt(len(nodes) * 2))))
+    """Tabellen ohne Beziehungen in einem Raster mit gleich breiten Spalten.
+
+    So viele Spalten, wie in `available_width` passen (mindestens
+    `isolated_columns`, höchstens so viele wie Tabellen).
+    """
+    col_w = max(n.width for n in nodes) + opt.row_gap * 1.5
+    per_row = max(opt.isolated_columns, int((available_width + opt.row_gap * 1.5) // col_w))
+    per_row = max(1, min(per_row, len(nodes)))
     positions: dict[Hashable, Position] = {}
     y = 0.0
     for start in range(0, len(nodes), per_row):
         row = nodes[start : start + per_row]
-        x = 0.0
-        for n in row:
-            positions[n.key] = (x, y)
-            x += n.width + opt.row_gap * 1.5
+        for i, n in enumerate(row):
+            positions[n.key] = (i * col_w, y)
         y += max(n.height for n in row) + opt.row_gap
     return positions, y - opt.row_gap

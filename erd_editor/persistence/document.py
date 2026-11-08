@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from erd_editor.model.layout import MAX_SCALE, MIN_SCALE, Frame
+from erd_editor.model.layout import MAX_SCALE, MIN_SCALE, ColumnMode, DisplayOptions, Frame
 from erd_editor.model import (
     Column,
     ConnectionProfile,
@@ -234,6 +234,12 @@ def _layout_to_dict(layout: Layout) -> dict[str, Any]:
     return {
         "notation": layout.notation,
         "scale": layout.scale,
+        "display": {
+            "columns": layout.display.columns.value,
+            "types": layout.display.show_types,
+            "indexes": layout.display.show_indexes,
+            "comments": layout.display.show_comments,
+        },
         "databases": databases,
         "entities": [
             {**_ref_to_dict(ref), "x": round(x, 1), "y": round(y, 1)}
@@ -260,6 +266,17 @@ def _layout_from_dict(d: dict[str, Any]) -> Layout:
         },
         scale=min(max(float(d.get("scale", 1.0)), MIN_SCALE), MAX_SCALE),
         notation=d.get("notation", "crowsfoot"),
+        display=_display_from_dict(d.get("display", {})),
+    )
+
+
+def _display_from_dict(d: dict[str, Any]) -> DisplayOptions:
+    default = DisplayOptions()
+    return DisplayOptions(
+        columns=ColumnMode(d.get("columns", default.columns.value)),
+        show_types=bool(d.get("types", default.show_types)),
+        show_indexes=bool(d.get("indexes", default.show_indexes)),
+        show_comments=bool(d.get("comments", default.show_comments)),
     )
 
 

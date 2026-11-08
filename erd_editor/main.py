@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QLibraryInfo, QLocale, QTimer, QTranslator
@@ -30,7 +31,7 @@ from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
 from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, export_png, print_scene
 from erd_editor.export.render import page_layout
-from erd_editor.model import ConnectionProfile, Database, Diagram, Dialect
+from erd_editor.model import ColumnMode, ConnectionProfile, Database, Diagram, Dialect
 from erd_editor.persistence import credentials
 from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory, needs_password
 from erd_editor.persistence.document import (
@@ -96,6 +97,7 @@ class MainWindow(QMainWindow):
         self.view = DiagramView(self.scene, self)
         self.setCentralWidget(self.view)
         self.document = DiagramDocument()
+        self._syncing_menu = False
         self.adapter_factory = default_adapter_factory  # in Tests austauschbar
         self.path: Path | None = None
         self.scene.layout_changed.connect(lambda: self.setWindowModified(True))
@@ -155,6 +157,60 @@ class MainWindow(QMainWindow):
         size_menu.addAction(self._action("Kleiner", lambda: self.step_display_scale(-1), QKeySequence("Ctrl+Shift+-")))
         self._sync_scale_menu()
 
+        # Darstellungsoptionen: was die Boxen zeigen
+        view_menu.addSeparator()
+        columns_menu = view_menu.addMenu("&Spalten")
+        self.column_group = QActionGroup(self)
+        self.column_actions: dict[ColumnMode, QAction] = {}
+        for mode, text, keys in [
+            (ColumnMode.ALL, "&Alle Spalten", "Ctrl+Alt+1"),
+            (ColumnMode.KEYS, "Nur &Schlüsselspalten (PK, FK)", "Ctrl+Alt+2"),
+            (ColumnMode.NONE, "&Keine Spalten (nur Tabellenname)", "Ctrl+Alt+3"),
+        ]:
+            action = QAction(text, self, checkable=True)
+            action.setShortcut(QKeySequence(keys))
+            action.triggered.connect(lambda checked, m=mode: self.update_display_options(columns=m))
+            self.column_group.addAction(action)
+            columns_menu.addAction(action)
+            self.column_actions[mode] = action
+        self.option_actions: dict[str, QAction] = {}
+        for field, text in [
+            ("show_types", "&Datentypen"),
+            ("show_indexes", "&Indexbereich"),
+            ("show_comments", "Tabellen&kommentare"),
+        ]:
+            action = QAction(text, self, checkable=True)
+            action.toggled.connect(lambda checked, f=field: self.update_display_options(**{f: checked}))
+            view_menu.addAction(action)
+            self.option_actions[field] = action
+        self._sync_display_menu()
+
+    # ------------------------------------------------------------------ Darstellungsoptionen
+
+    def update_display_options(self, **changes) -> None:
+        """Einzelne Darstellungsoptionen ändern (columns, show_types, show_indexes, show_comments)."""
+        if self._syncing_menu:
+            return
+        options = replace(self.scene.display_options, **changes)
+        overlaps = self.scene.set_display_options(options)
+        self._sync_display_menu()
+        if overlaps:
+            self.statusBar().showMessage("Einige Boxen überlappen jetzt – Anordnen → Automatisch anordnen (Strg+L)")
+        else:
+            self.statusBar().showMessage("Darstellung geändert")
+
+    def _sync_display_menu(self) -> None:
+        """Menüzustand an die Optionen der Szene anpassen (ohne Rückkopplung)."""
+        o = self.scene.display_options
+        self._syncing_menu = True
+        try:
+            for mode, action in self.column_actions.items():
+                action.setChecked(mode is o.columns)
+            for field, action in self.option_actions.items():
+                action.setChecked(getattr(o, field))
+        finally:
+            self._syncing_menu = False
+
     # ------------------------------------------------------------------ Darstellungsgröße
 
     def set_display_scale(self, factor: float) -> None:
@@ -191,6 +247,7 @@ class MainWindow(QMainWindow):
         self.document = document
         self.scene.load(document.diagram, document.layout if use_layout else None)
         self._sync_scale_menu()
+        self._sync_display_menu()
         problems = document.diagram.validate()
         msg = f"{len(self.scene.entities)} Tabellen aus {len(document.diagram.databases)} Datenbank(en)"
         if problems:

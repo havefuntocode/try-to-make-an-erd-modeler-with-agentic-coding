@@ -173,7 +173,7 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - [x] PostgreSQL-Adapter
 - [x] Schemas als innere Rechtecke (PostgreSQL, SQL Server)
 - [x] SQL-Server-Adapter (Windows-Anmeldung oder SQL-Login)
-- [ ] Darstellungsoptionen: Datentypen ein/aus, nur Schlüsselspalten, Kommentare
+- [x] Darstellungsoptionen: Datentypen ein/aus, nur Schlüsselspalten, Kommentare (dazu: keine Spalten, Indexbereich)
 - [ ] Mehrere Teildiagramme pro Datenbank (z. B. „Bestellwesen“, „Personal“)
 - [ ] Export SVG (PNG ist in Version 1 vorgezogen)
 - [ ] Undo/Redo (`QUndoStack`) – zunächst für Layout-Aktionen, Fundament für Version 3
