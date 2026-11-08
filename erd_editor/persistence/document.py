@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from erd_editor.analysis.overrides import RelationshipKey, RelationshipOverride
 from erd_editor.model.layout import MAX_SCALE, MIN_SCALE, ColumnMode, DisplayOptions, Frame
 from erd_editor.model import (
     Column,
@@ -54,6 +55,7 @@ class DiagramDocument:
     layout: Layout = field(default_factory=Layout)
     connections: list[ConnectionProfile] = field(default_factory=list)
     subdiagrams: list[Subdiagram] = field(default_factory=list)
+    overrides: dict[RelationshipKey, RelationshipOverride] = field(default_factory=dict)
 
     def subdiagram(self, name: str | None) -> Subdiagram | None:
         return next((s for s in self.subdiagrams if s.name == name), None)
@@ -102,6 +104,16 @@ def document_to_dict(doc: DiagramDocument) -> dict[str, Any]:
             }
             for sd in doc.subdiagrams
         ],
+        "overrides": [
+            {
+                **_ref_to_dict(child),
+                "foreign_key": fk_name,
+                "child_min_one": o.child_min_one,
+                "identifying": o.identifying,
+            }
+            for (child, fk_name), o in sorted(doc.overrides.items(), key=lambda kv: (_sort_key(kv[0][0]), kv[0][1]))
+            if not o.is_empty
+        ],
     }
 
 
@@ -124,6 +136,10 @@ def document_from_dict(data: Any) -> DiagramDocument:
                 )
                 for sd in data.get("subdiagrams", [])
             ],
+            overrides={
+                (_ref_from_dict(o), o["foreign_key"]): RelationshipOverride(o.get("child_min_one"), o.get("identifying"))
+                for o in data.get("overrides", [])
+            },
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise DocumentError(f"Diagrammdatei ist beschädigt: {exc!r}") from exc

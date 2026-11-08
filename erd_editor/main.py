@@ -22,11 +22,13 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QStyleFactory,
 )
 
 from erd_editor.adapters.base import AdapterError
+from erd_editor.analysis import RelationshipOverride, describe_override, is_identifying, relationship_key
 from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
 from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, export_png, export_svg, print_scene
@@ -107,6 +109,7 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
         self.undo_stack.setUndoLimit(200)
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.scene.gesture_finished.connect(self._push_gesture)
+        self.scene.relation_context_requested.connect(self.relation_menu)
         self._init_tabs()
         self._create_menus()
         self._update_title()
@@ -272,6 +275,65 @@ class MainWindow(SubdiagramTabsMixin, QMainWindow):
 
     def fit_frames(self) -> None:
         self.record_layout("Rahmen an Inhalt anpassen", self.scene.fit_frames_to_content)
+
+    # ------------------------------------------------------------------ Überschreibungen
+
+    def relation_menu(self, item, screen_pos) -> None:
+        """Kontextmenü einer Linie anzeigen."""
+        self.build_relation_menu(item).exec(screen_pos)
+
+    def build_relation_menu(self, item) -> QMenu:
+        """Kontextmenü einer Linie: Mindestkardinalität und identifizierend festlegen."""
+        rel = item.relationship
+        key = relationship_key(rel)
+        current = self.document.overrides.get(key, RelationshipOverride())
+        menu = QMenu(self)
+        title = menu.addAction(f"Beziehung {rel.name}")
+        title.setEnabled(False)
+        menu.addSeparator()
+
+        min_one = menu.addAction("Elternteil hat mindestens ein Kind")
+        min_one.setCheckable(True)
+        min_one.setChecked(rel.child_end.minimum == 1)
+        min_one.triggered.connect(
+            lambda checked: self.set_override(key, replace(current, child_min_one=True if checked else None))
+        )
+
+        ident_menu = menu.addMenu("Identifizierend")
+        group = QActionGroup(ident_menu)
+        derived = "ja" if self._derived_identifying(rel) else "nein"
+        for value, text in [(None, f"Automatisch (abgeleitet: {derived})"), (True, "Ja (schwache Entität)"), (False, "Nein")]:
+            action = ident_menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(current.identifying is value)
+            group.addAction(action)
+            action.triggered.connect(lambda checked, v=value: self.set_override(key, replace(current, identifying=v)))
+
+        menu.addSeparator()
+        reset = menu.addAction("Auf automatisch zurücksetzen")
+        reset.setEnabled(not current.is_empty)
+        reset.triggered.connect(lambda: self.set_override(key, RelationshipOverride()))
+        return menu
+
+    def _derived_identifying(self, rel) -> bool:
+        """Aus dem Schema abgeleitet – unabhängig von einer Überschreibung."""
+        table = self.document.diagram.find_table(rel.child)
+        return rel.identifying if table is None else is_identifying(table, rel.foreign_key)
+
+    def set_override(self, key, override: RelationshipOverride) -> None:
+        """Überschreibung setzen (leer = entfernen) – als ein Rückgängig-Schritt."""
+        old = self.document.overrides.get(key, RelationshipOverride())
+        if old == override:
+            return
+        before = self.snapshot()
+        if override.is_empty:
+            self.document.overrides.pop(key, None)
+        else:
+            self.document.overrides[key] = override
+        self.scene.set_overrides(self.document.overrides)
+        text = describe_override(override) or "automatisch"
+        self.record_document(before, f"„{key[1]}“: {text}")
+        self.statusBar().showMessage(f"Beziehung {key[1]}: {text}")
 
     # ------------------------------------------------------------------ Rückgängig/Wiederholen
 

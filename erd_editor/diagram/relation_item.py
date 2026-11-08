@@ -112,13 +112,15 @@ class RelationItem(QGraphicsItem):
         child = f"{escape(r.child.key)} ({escape(', '.join(fk.columns))})"
         parent = f"{escape(r.parent.key)} ({escape(', '.join(fk.referenced_columns))})"
         kind = "1:1" if r.is_one_to_one else "1:n"
+        manual = " <i>(manuell)</i>" if r.manual else ""
         lines = [
             f"<b>{escape(fk.name)}</b>",
             f"{child} → {parent}",
-            f"{kind}, {'identifizierend' if r.identifying else 'nicht identifizierend'}",
+            f"{kind}, {'identifizierend' if r.identifying else 'nicht identifizierend'}{manual}",
             f"Elternteil {r.parent_end}, Kinder {r.child_end}",
         ]
         rules = [f"ON {label} {value}" for label, value in (("UPDATE", fk.on_update), ("DELETE", fk.on_delete)) if value]
         if rules:
             lines.append(escape(", ".join(rules)))
+        lines.append("<span style='color:#6B7280'>Rechtsklick: Kardinalität/identifizierend festlegen</span>")
         return "<br>".join(lines)

@@ -60,6 +60,7 @@ class Relationship:
     child_end: Cardinality
     parallel_index: int = 0
     parallel_count: int = 1
+    manual: bool = False  # durch eine manuelle Überschreibung verändert
 
     @property
     def name(self) -> str:

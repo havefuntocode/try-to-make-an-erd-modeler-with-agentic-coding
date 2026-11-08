@@ -46,7 +46,7 @@ class TestDocumentFormat:
 
     def test_schema_and_layout_are_separate(self, document):
         data = document_to_dict(document)
-        assert set(data) == {"format", "version", "connections", "schema", "layout", "subdiagrams"}
+        assert set(data) == {"format", "version", "connections", "schema", "layout", "subdiagrams", "overrides"}
         def keys(obj):
             if isinstance(obj, dict):
                 for k, v in obj.items():

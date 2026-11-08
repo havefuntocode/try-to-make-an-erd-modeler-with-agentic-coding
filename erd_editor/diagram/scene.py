@@ -11,9 +11,9 @@ from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneMouseEvent
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneContextMenuEvent, QGraphicsSceneMouseEvent
 
-from erd_editor.analysis import ZERO_OR_MANY, derive_relationships
+from erd_editor.analysis import ZERO_OR_MANY, RelationshipKey, RelationshipOverride, apply_overrides, derive_relationships
 from erd_editor.diagram.container_item import ContainerItem
 from erd_editor.diagram.entity_item import EntityItem
 from erd_editor.diagram.palette import colors_for
@@ -40,6 +40,8 @@ class DiagramScene(QGraphicsScene):
     layout_changed = Signal()  # Nutzer hat Positionen verändert
     # Mausgeste abgeschlossen: Layout vorher, nachher, Beschreibung (für Rückgängig)
     gesture_finished = Signal(object, object, str)
+    # Rechtsklick auf eine Linie: RelationItem, Bildschirmposition
+    relation_context_requested = Signal(object, object)
 
     def __init__(self, parent=None, notation: Notation | None = None) -> None:
         super().__init__(parent)
@@ -54,11 +56,18 @@ class DiagramScene(QGraphicsScene):
         self.display_scale = 1.0  # Darstellungsgröße (1.0 = 100 %)
         self.display_options = DisplayOptions()
         self._gesture_before: Layout | None = None
+        self.overrides: dict[RelationshipKey, RelationshipOverride] = {}
         self.selectionChanged.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------ Aufbau
 
-    def load(self, diagram: Diagram, layout: Layout | None = None, style: EntityStyle | None = None) -> None:
+    def load(
+        self,
+        diagram: Diagram,
+        layout: Layout | None = None,
+        style: EntityStyle | None = None,
+        overrides: dict[RelationshipKey, RelationshipOverride] | None = None,
+    ) -> None:
         """Szene leeren und alle Tabellen und Beziehungen des Diagramms anlegen.
 
         Ohne `layout` wird automatisch angeordnet. Mit `layout` behalten
@@ -72,6 +81,7 @@ class DiagramScene(QGraphicsScene):
         self.schema_items = {}
         self.clear()
         self.diagram = diagram
+        self.overrides = dict(overrides or {})
         if layout is not None:
             self.display_scale = min(max(layout.scale, MIN_SCALE), MAX_SCALE)
             self.display_options = layout.display
@@ -101,11 +111,7 @@ class DiagramScene(QGraphicsScene):
                     container.members.append(item)
                     if schema_item is not None:
                         schema_item.members.append(item)
-        for rel in derive_relationships(diagram):
-            item = RelationItem(rel, self.entities[rel.child], self.entities[rel.parent], self.notation)
-            item.scale_factor = self.display_scale
-            self.addItem(item)
-            self.relations.append(item)
+        self._build_relations()
         if layout is None:
             self.auto_layout(notify=False)
         else:
@@ -117,6 +123,33 @@ class DiagramScene(QGraphicsScene):
                 if key in self.schema_items:
                     self.schema_items[key].manual_rect = QRectF(*frame)
             self.update_containers()
+
+    def _build_relations(self) -> None:
+        """Linien aus dem Diagramm ableiten (mit Überschreibungen) und anlegen."""
+        for item in self.relations:
+            self.removeItem(item)
+        self.relations = []
+        if self.diagram is None:
+            return
+        for rel in apply_overrides(derive_relationships(self.diagram), self.overrides):
+            item = RelationItem(rel, self.entities[rel.child], self.entities[rel.parent], self.notation)
+            item.scale_factor = self.display_scale
+            self.addItem(item)
+            self.relations.append(item)
+
+    def set_overrides(self, overrides: dict[RelationshipKey, RelationshipOverride]) -> None:
+        """Manuelle Überschreibungen ändern; Linien werden neu aufgebaut."""
+        self.overrides = dict(overrides)
+        self._build_relations()
+        self.update_relations()
+
+    def contextMenuEvent(self, event: QGraphicsSceneContextMenuEvent) -> None:
+        for item in self.items(event.scenePos()):
+            if isinstance(item, RelationItem):
+                self.relation_context_requested.emit(item, event.screenPos())
+                event.accept()
+                return
+        super().contextMenuEvent(event)
 
     @staticmethod
     def _assign_colors(diagram: Diagram, saved: dict[str, int]) -> dict[str, int]:

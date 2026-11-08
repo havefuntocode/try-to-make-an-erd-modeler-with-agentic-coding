@@ -100,7 +100,7 @@ class SubdiagramTabsMixin:
         self.current_view = name
         if name is None:
             # ohne Positionen ordnet die Szene automatisch an; Größe und Optionen gelten trotzdem
-            self.scene.load(self.document.diagram, self.document.layout)
+            self.scene.load(self.document.diagram, self.document.layout, overrides=self.document.overrides)
             self.document.layout = self.scene.current_layout()
         else:
             sd = self.document.subdiagram(name)
@@ -110,7 +110,7 @@ class SubdiagramTabsMixin:
                 start = Layout(database_colors=colors, scale=main.scale, display=main.display)
             else:
                 start = replace(sd.layout, database_colors=colors)
-            self.scene.load(filter_diagram(self.document.diagram, sd.tables), start)
+            self.scene.load(filter_diagram(self.document.diagram, sd.tables), start, overrides=self.document.overrides)
             sd.layout = self.scene.current_layout()
         self.sync_tabs()
         self._sync_menus()
@@ -161,6 +161,7 @@ class SubdiagramTabsMixin:
             doc.layout,
             list(doc.connections),
             [Subdiagram(sd.name, list(sd.tables), sd.layout) for sd in doc.subdiagrams],
+            dict(doc.overrides),
         )
         return Snapshot(copy, self.current_view)
 
@@ -171,6 +172,7 @@ class SubdiagramTabsMixin:
             doc.layout,
             list(doc.connections),
             [Subdiagram(sd.name, list(sd.tables), sd.layout) for sd in doc.subdiagrams],
+            dict(doc.overrides),
         )
         self.show_view(snap.view)
 
