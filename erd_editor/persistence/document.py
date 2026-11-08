@@ -34,6 +34,7 @@ from erd_editor.model import (
     IndexKind,
     Layout,
     Schema,
+    Subdiagram,
     Table,
     TableRef,
 )
@@ -52,6 +53,10 @@ class DiagramDocument:
     diagram: Diagram = field(default_factory=Diagram)
     layout: Layout = field(default_factory=Layout)
     connections: list[ConnectionProfile] = field(default_factory=list)
+    subdiagrams: list[Subdiagram] = field(default_factory=list)
+
+    def subdiagram(self, name: str | None) -> Subdiagram | None:
+        return next((s for s in self.subdiagrams if s.name == name), None)
 
     def connection(self, name: str | None) -> ConnectionProfile | None:
         return next((c for c in self.connections if c.name == name), None)
@@ -89,6 +94,14 @@ def document_to_dict(doc: DiagramDocument) -> dict[str, Any]:
         "connections": [_profile_to_dict(p) for p in doc.connections],
         "schema": {"databases": [_database_to_dict(db) for db in doc.diagram.databases]},
         "layout": _layout_to_dict(doc.layout),
+        "subdiagrams": [
+            {
+                "name": sd.name,
+                "tables": [_ref_to_dict(r) for r in sorted(sd.tables, key=_sort_key)],
+                "layout": _layout_to_dict(sd.layout) if sd.layout is not None else None,
+            }
+            for sd in doc.subdiagrams
+        ],
     }
 
 
@@ -103,6 +116,14 @@ def document_from_dict(data: Any) -> DiagramDocument:
             diagram=Diagram([_database_from_dict(d) for d in data.get("schema", {}).get("databases", [])]),
             layout=_layout_from_dict(data.get("layout", {})),
             connections=[_profile_from_dict(p) for p in data.get("connections", [])],
+            subdiagrams=[
+                Subdiagram(
+                    sd["name"],
+                    [_ref_from_dict(r) for r in sd.get("tables", [])],
+                    _layout_from_dict(sd["layout"]) if sd.get("layout") is not None else None,
+                )
+                for sd in data.get("subdiagrams", [])
+            ],
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise DocumentError(f"Diagrammdatei ist beschädigt: {exc!r}") from exc

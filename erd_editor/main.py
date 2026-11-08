@@ -31,9 +31,10 @@ from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
 from erd_editor.export import Orientation, PageFormat, PageSpec, export_pdf, export_png, print_scene
 from erd_editor.export.render import page_layout
-from erd_editor.model import ColumnMode, ConnectionProfile, Database, Diagram, Dialect
+from erd_editor.model import ColumnMode, ConnectionProfile, Database, Diagram, Dialect, Layout
 from erd_editor.persistence import credentials
 from erd_editor.ui.commands import DocumentCommand, LayoutCommand
+from erd_editor.ui.subdiagram_tabs import MAIN_VIEW_TITLE, SubdiagramTabsMixin
 from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory, needs_password
 from erd_editor.persistence.document import (
     FILE_SUFFIX,
@@ -90,14 +91,14 @@ def describe_changes(old: Diagram, new: Diagram) -> str:
     return f"Neu eingelesen – {added} neu, {removed} entfernt"
 
 
-class MainWindow(QMainWindow):
+class MainWindow(SubdiagramTabsMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.resize(1200, 800)
         self.scene = DiagramScene(self)
         self.view = DiagramView(self.scene, self)
-        self.setCentralWidget(self.view)
         self.document = DiagramDocument()
+        self.current_view = None  # None = „Gesamt“, sonst Name des Teildiagramms
         self._syncing_menu = False
         self.adapter_factory = default_adapter_factory  # in Tests austauschbar
         self.path: Path | None = None
@@ -106,6 +107,7 @@ class MainWindow(QMainWindow):
         self.undo_stack.setUndoLimit(200)
         self.undo_stack.cleanChanged.connect(self._on_clean_changed)
         self.scene.gesture_finished.connect(self._push_gesture)
+        self._init_tabs()
         self._create_menus()
         self._update_title()
         self.statusBar().showMessage(USAGE_HINT)
@@ -148,6 +150,16 @@ class MainWindow(QMainWindow):
         layout_menu = self.menuBar().addMenu("A&nordnen")
         layout_menu.addAction(self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L")))
         layout_menu.addAction(self._action("&Rahmen an Inhalt anpassen", self.fit_frames))
+
+        sub_menu = self.menuBar().addMenu("&Teildiagramm")
+        sub_menu.addAction(self._action("&Neu …", self.new_subdiagram, QKeySequence("Ctrl+T")))
+        sub_menu.addAction(self._action("Aus &Auswahl", lambda: self.new_subdiagram(from_selection=True),
+                                        QKeySequence("Ctrl+Shift+T")))
+        sub_menu.addAction(self._action("&Bearbeiten …", lambda: self.edit_subdiagram()))
+        sub_menu.addAction(self._action("&Löschen", lambda: self.delete_subdiagram()))
+        sub_menu.addSeparator()
+        sub_menu.addAction(self._action("Nächste Ansicht", lambda: self.step_view(+1), QKeySequence("Ctrl+PgDown")))
+        sub_menu.addAction(self._action("Vorige Ansicht", lambda: self.step_view(-1), QKeySequence("Ctrl+PgUp")))
 
         view_menu = self.menuBar().addMenu("&Ansicht")
         view_menu.addAction(self._action("Vergrößern", self.view.zoom_in, [QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+=")]))
@@ -268,24 +280,16 @@ class MainWindow(QMainWindow):
         action()
         after = self.scene.current_layout()
         if after != before:
-            self.undo_stack.push(LayoutCommand(self.scene, before, after, text, self._sync_menus))
+            self._push_layout(before, after, text)
 
     def _push_gesture(self, before, after, text: str) -> None:
         """Mausgeste der Szene (Verschieben, Rahmen aufziehen) als ein Schritt."""
-        self.undo_stack.push(LayoutCommand(self.scene, before, after, text, self._sync_menus))
+        self._push_layout(before, after, text)
 
-    def _record_document(self, before: DiagramDocument, text: str) -> None:
-        """Schema-Änderung (bereits angezeigt) als ein Schritt ablegen."""
-        after = DiagramDocument(self.document.diagram, self.scene.current_layout(), list(self.document.connections))
-        self.undo_stack.push(DocumentCommand(self._restore_document, before, after, text))
-
-    def _snapshot(self) -> DiagramDocument:
-        return DiagramDocument(self.document.diagram, self.scene.current_layout(), list(self.document.connections))
-
-    def _restore_document(self, document: DiagramDocument) -> None:
-        self.document = DiagramDocument(document.diagram, document.layout, list(document.connections))
-        self.scene.load(document.diagram, document.layout)
-        self._sync_menus()
+    def _push_layout(self, before, after, text: str) -> None:
+        view = self.current_view
+        self.undo_stack.push(LayoutCommand(self.scene, before, after, text, self._sync_menus,
+                                           prepare=lambda: self.activate_view(view)))
 
     def _sync_menus(self) -> None:
         self._sync_scale_menu()
@@ -304,15 +308,15 @@ class MainWindow(QMainWindow):
     def show_document(self, document: DiagramDocument, use_layout: bool) -> None:
         self.undo_stack.clear()  # neues Dokument: nichts mehr rückgängig zu machen
         self.document = document
-        self.scene.load(document.diagram, document.layout if use_layout else None)
-        self._sync_scale_menu()
-        self._sync_display_menu()
+        if not use_layout:  # neu eingelesen: automatisch anordnen, Größe und Optionen der Sitzung behalten
+            document.layout = Layout(scale=self.scene.display_scale, display=self.scene.display_options)
+        self.current_view = None
+        self.show_view(None)
         problems = document.diagram.validate()
         msg = f"{len(self.scene.entities)} Tabellen aus {len(document.diagram.databases)} Datenbank(en)"
         if problems:
             msg += f" – {len(problems)} Hinweis(e), z. B.: {problems[0]}"
         self.statusBar().showMessage(msg)
-        QTimer.singleShot(0, self.view.zoom_to_fit)
 
     def load_diagram(self, diagram: Diagram) -> None:
         """Diagramm ohne Datei anzeigen (automatisch angeordnet)."""
@@ -395,19 +399,17 @@ class MainWindow(QMainWindow):
             self._update_title()
             self.setWindowModified(True)
             return
-        before = self._snapshot()
+        before = self.snapshot()
         old = self.document.diagram
         fresh = {db.name: db for db in databases}
         merged = [fresh.pop(db.name, db) for db in old.databases] + list(fresh.values())
-        connections = [c for c in self.document.connections if c.name != profile.name] + [profile]
-        new_diagram = Diagram(merged)
-        layout = self.scene.current_layout()
-        self.document = DiagramDocument(new_diagram, layout, connections)
-        self.scene.load(new_diagram, layout)
-        self._record_document(before, "Datenbanken hinzufügen")
-        self.statusBar().showMessage(describe_changes(old, new_diagram))
+        self.document.connections = [c for c in self.document.connections if c.name != profile.name] + [profile]
+        self.document.diagram = Diagram(merged)
+        self.prune_subdiagrams(self.document.diagram)
+        self.show_view(self.current_view)
+        self.record_document(before, "Datenbanken hinzufügen")
+        self.statusBar().showMessage(describe_changes(old, self.document.diagram))
         self.setWindowModified(True)
-        QTimer.singleShot(0, self.view.zoom_to_fit)
 
     def load_mysql(self, target: str, databases: list[str]) -> None:
         try:
@@ -440,11 +442,11 @@ class MainWindow(QMainWindow):
 
         # Reihenfolge beibehalten; Datenbanken ohne Profil bleiben unverändert
         new_diagram = Diagram([fresh.get(db.name, db) for db in old.databases])
-        before = self._snapshot()
-        layout = self.scene.current_layout()
-        self.document = DiagramDocument(new_diagram, layout, self.document.connections)
-        self.scene.load(new_diagram, layout)
-        self._record_document(before, "Neu einlesen")
+        before = self.snapshot()
+        self.document.diagram = new_diagram
+        self.prune_subdiagrams(new_diagram)
+        self.show_view(self.current_view)
+        self.record_document(before, "Neu einlesen")
         self.statusBar().showMessage(describe_changes(old, new_diagram))
         self.setWindowModified(True)
 
@@ -482,7 +484,7 @@ class MainWindow(QMainWindow):
         return self._write(with_suffix(path))
 
     def _write(self, path: Path) -> bool:
-        self.document.layout = self.scene.current_layout()
+        self.store_view_state()
         try:
             save_document(self.document, path)
         except OSError as exc:
@@ -499,7 +501,8 @@ class MainWindow(QMainWindow):
 
     def footer_text(self) -> str:
         name = self.path.name if self.path else "Unbenanntes Diagramm"
-        return f"{name} · {QDate.currentDate().toString('dd.MM.yyyy')}"
+        view = f" · {self.current_view}" if self.current_view else ""
+        return f"{name}{view} · {QDate.currentDate().toString('dd.MM.yyyy')}"
 
     def _has_content(self) -> bool:
         if not self.scene.entities:
