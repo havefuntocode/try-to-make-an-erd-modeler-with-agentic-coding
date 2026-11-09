@@ -282,3 +282,17 @@ class ModelingMixin:
         diagram = self._try(lambda: delete_relationship(self.document.diagram, child, fk_name, drop_columns))
         if diagram is not None:
             self.apply_model_change(diagram, f"Beziehung „{fk_name}“ löschen")
+
+    # ------------------------------------------------------------------ SQL-Export
+
+    def sql_export_dialog(self) -> None:
+        """Modell → SQL-Skript erzeugen … (vorausgewählt: Modell-Datenbanken, sonst alle)."""
+        from erd_editor.ui.sql_dialog import SqlExportDialog
+
+        diagram = self.document.diagram
+        if not diagram.databases:
+            self.statusBar().showMessage("Nichts zu exportieren – zuerst eine Datenbank anlegen oder einlesen")
+            return
+        modeled = [db.name for db in diagram.databases if db.modeled]
+        start = self.path.parent if self.path else None
+        SqlExportDialog(diagram, modeled or None, start, self).exec()

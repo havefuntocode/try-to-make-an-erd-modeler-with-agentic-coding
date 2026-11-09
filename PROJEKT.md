@@ -198,7 +198,8 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
 - [x] Beziehung löschen (Rechtsklick auf die Linie), mit oder ohne FK-Spalten
 - [x] Alle Bearbeitungen über Undo/Redo
 - [ ] Szene gezielt aktualisieren statt komplett neu aufbauen
-- [ ] SQL-Export (`CREATE TABLE …`) für MySQL
+- [x] SQL-Export (`CREATE TABLE …`) für MySQL, PostgreSQL und SQL Server
+      (Roundtrip-Test gegen alle drei Server: Skript ausführen, wieder einlesen, gleiches Schema)
 
 ### Später
 - [ ] Views als eigene Objektart

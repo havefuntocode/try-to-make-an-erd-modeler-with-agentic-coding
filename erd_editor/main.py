@@ -144,6 +144,7 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         file_menu.addAction(self._action("Als &PDF exportieren …", self.export_pdf_dialog, QKeySequence("Ctrl+Shift+P")))
         file_menu.addAction(self._action("Als P&NG exportieren …", self.export_png_dialog, QKeySequence("Ctrl+Shift+E")))
         file_menu.addAction(self._action("Als S&VG exportieren …", self.export_svg_dialog, QKeySequence("Ctrl+Shift+G")))
+        file_menu.addAction(self._action("Als S&QL-Skript exportieren …", self.sql_export_dialog))
         file_menu.addSeparator()
         file_menu.addAction(self._action("&Beenden", self.close, QKeySequence.StandardKey.Quit))
 
@@ -169,6 +170,7 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         model_menu.addAction(self._action("Be&ziehung zeichnen", self.start_relation_tool, QKeySequence("Ctrl+B")))
         model_menu.addSeparator()
         model_menu.addAction(self._action("Als &Modell übernehmen …", self.take_over_dialog))
+        model_menu.addAction(self._action("&SQL-Skript erzeugen …", self.sql_export_dialog, QKeySequence("Ctrl+Shift+Q")))
 
         sub_menu = self.menuBar().addMenu("&Teildiagramm")
         sub_menu.addAction(self._action("&Neu …", self.new_subdiagram, QKeySequence("Ctrl+T")))
