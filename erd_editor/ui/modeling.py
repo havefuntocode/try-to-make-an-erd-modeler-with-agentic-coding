@@ -26,6 +26,8 @@ from erd_editor.model import Diagram, Dialect, Layout, TableRef
 from erd_editor.model.editing import (
     EditError,
     add_database,
+    add_relationship,
+    delete_relationship,
     add_table,
     delete_table,
     replace_table,
@@ -33,6 +35,7 @@ from erd_editor.model.editing import (
 )
 from erd_editor.model.types import DEFAULT_SCHEMAS
 from erd_editor.persistence.document import DiagramDocument
+from erd_editor.ui.relationship_dialog import RelationshipDialog
 from erd_editor.ui.table_dialog import TableDialog
 
 DIALECT_LABELS = {Dialect.MYSQL: "MySQL", Dialect.POSTGRESQL: "PostgreSQL", Dialect.MSSQL: "SQL Server"}
@@ -248,3 +251,34 @@ class ModelingMixin:
                 return
         text = f"Tabelle „{refs[0].table}“ löschen" if len(refs) == 1 else f"{len(refs)} Tabellen löschen"
         self.apply_model_change(diagram, text)
+
+    # ------------------------------------------------------------------ Beziehungen
+
+    def start_relation_tool(self) -> None:
+        """Modell → Beziehung zeichnen: von der Kind- zur Elterntabelle ziehen."""
+        if not self.editable_targets():
+            self.statusBar().showMessage("Keine Modell-Datenbank – Beziehungen lassen sich nur in Modellen anlegen")
+            return
+        self.view.set_relation_mode(True)
+        self.statusBar().showMessage("Beziehung zeichnen: auf die Kindtabelle drücken und zur Elterntabelle ziehen (Esc bricht ab)")
+
+    def on_relation_drawn(self, child: TableRef, parent: TableRef) -> None:
+        if not self.document.diagram.database(child.database).modeled:
+            self.statusBar().showMessage(READ_ONLY_HINT)
+            return
+        dialog = RelationshipDialog(self.document.diagram, child, parent, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.create_relationship(child, parent, **dialog.options())
+
+    def create_relationship(self, child: TableRef, parent: TableRef, one_to_one: bool = False,
+                            identifying: bool = False, mandatory: bool = True) -> None:
+        result = self._try(lambda: add_relationship(self.document.diagram, child, parent,
+                                                    one_to_one, identifying, mandatory))
+        if result is not None:
+            diagram, plan = result
+            self.apply_model_change(diagram, f"Beziehung „{plan.fk_name}“ anlegen")
+
+    def remove_relationship(self, child: TableRef, fk_name: str, drop_columns: bool = True) -> None:
+        diagram = self._try(lambda: delete_relationship(self.document.diagram, child, fk_name, drop_columns))
+        if diagram is not None:
+            self.apply_model_change(diagram, f"Beziehung „{fk_name}“ löschen")

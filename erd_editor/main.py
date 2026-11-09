@@ -113,6 +113,7 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         self.scene.gesture_finished.connect(self._push_gesture)
         self.scene.relation_context_requested.connect(self.relation_menu)
         self.scene.entity_activated.connect(self.edit_table)
+        self.view.relation_drawn.connect(self.on_relation_drawn)
         self._init_tabs()
         self._create_menus()
         self._update_title()
@@ -164,6 +165,8 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         model_menu.addAction(self._action("Neue &Tabelle …", self.new_table_dialog, QKeySequence("Ctrl+Shift+N")))
         model_menu.addAction(self._action("Tabelle &bearbeiten …", self._edit_selected_table, QKeySequence("Return")))
         model_menu.addAction(self._action("Tabellen &löschen …", self.delete_selected_tables, QKeySequence.StandardKey.Delete))
+        model_menu.addSeparator()
+        model_menu.addAction(self._action("Be&ziehung zeichnen", self.start_relation_tool, QKeySequence("Ctrl+B")))
         model_menu.addSeparator()
         model_menu.addAction(self._action("Als &Modell übernehmen …", self.take_over_dialog))
 
@@ -337,6 +340,15 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         reset = menu.addAction("Auf automatisch zurücksetzen")
         reset.setEnabled(not current.is_empty)
         reset.triggered.connect(lambda: self.set_override(key, RelationshipOverride()))
+
+        # Löschen nur in Modell-Datenbanken
+        db = self.document.diagram.database(rel.child.database)
+        if db is not None and db.modeled:
+            menu.addSeparator()
+            menu.addAction("Beziehung löschen (mit FK-Spalten)").triggered.connect(
+                lambda: self.remove_relationship(rel.child, rel.name, drop_columns=True))
+            menu.addAction("Beziehung löschen (Spalten behalten)").triggered.connect(
+                lambda: self.remove_relationship(rel.child, rel.name, drop_columns=False))
         return menu
 
     def _derived_identifying(self, rel) -> bool:

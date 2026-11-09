@@ -129,3 +129,109 @@ def test_delete_table(model):
 def test_modeled_flag_saved():
     d = add_database(Diagram(), "lager", Dialect.MYSQL)
     assert document_from_dict(document_to_dict(DiagramDocument(d))).diagram.database("lager").modeled
+
+
+# ---------------------------------------------------------------- Beziehungen
+
+from erd_editor.analysis import derive_relationships  # noqa: E402
+from erd_editor.model.editing import add_relationship, delete_relationship, plan_relationship  # noqa: E402
+
+
+def rel(diagram, name):
+    return next(r for r in derive_relationships(diagram) if r.name == name)
+
+
+class TestRelationships:
+    def test_one_to_many(self, model):
+        d, plan = add_relationship(model, shop("artikel"), shop("kunde"), mandatory=False)
+        assert [(c.name, c.data_type, c.nullable) for c in plan.columns] == [("kunde_id", "int", True)]
+        r = rel(d, plan.fk_name)
+        assert (r.child, r.parent, str(r.parent_end), str(r.child_end), r.identifying) == (
+            shop("artikel"), shop("kunde"), "0..1", "0..*", False)
+        assert d.validate() == []
+
+    def test_mandatory(self, model):
+        d, plan = add_relationship(model, shop("artikel"), shop("kunde"))
+        assert str(rel(d, plan.fk_name).parent_end) == "1..1"
+
+    def test_one_to_one(self, model):
+        d, plan = add_relationship(model, shop("artikel"), shop("kunde"), one_to_one=True)
+        assert plan.unique_index == "uq_artikel_kunde"
+        assert rel(d, plan.fk_name).is_one_to_one
+
+    def test_identifying_extends_primary_key(self, model):
+        d, plan = add_relationship(model, shop("artikel"), shop("kategorie"), identifying=True)
+        assert d.find_table(shop("artikel")).primary_key_columns == ("id", "kategorie_id")
+        r = rel(d, plan.fk_name)
+        assert r.identifying and not r.is_one_to_one
+
+    def test_identifying_one_to_one_without_pk(self, model):
+        d = add_table(model, shop("profil"), Table("profil", [Column("text", "text")]))
+        d, plan = add_relationship(d, shop("profil"), shop("kunde"), one_to_one=True, identifying=True)
+        assert d.find_table(shop("profil")).primary_key_columns == ("kunde_id",)
+        r = rel(d, plan.fk_name)
+        assert r.identifying and r.is_one_to_one
+
+    def test_composite_parent_key(self, model):
+        d, plan = add_relationship(model, shop("artikel"), shop("adresse"))
+        assert [c.name for c in plan.columns] == ["kunde_id", "nr"]
+        assert plan.referenced_columns == ("kunde_id", "nr")
+        assert d.validate() == []
+
+    def test_name_conflicts_are_resolved(self, model):
+        d, plan = add_relationship(model, shop("bestellung"), shop("kunde"))
+        assert [c.name for c in plan.columns] == ["kunde_id_2"]  # kunde_id gibt es schon
+        assert plan.fk_name == "fk_bestellung_kunde_2"  # fk_bestellung_kunde gibt es schon
+        assert d.validate() == []
+
+    def test_self_reference(self, model):
+        d, plan = add_relationship(model, shop("kategorie"), shop("kategorie"), mandatory=False)
+        assert [c.name for c in plan.columns] == ["kategorie_id"]
+        assert rel(d, plan.fk_name).is_self_reference
+        with pytest.raises(EditError, match="Selbstreferenz"):
+            plan_relationship(model, shop("kategorie"), shop("kategorie"), identifying=True)
+
+    def test_refusals(self, model, test_schema):
+        with pytest.raises(EditError, match="innerhalb einer Datenbank"):
+            plan_relationship(model, shop("kunde"), TableRef("stammdaten", None, "land"))
+        with pytest.raises(EditError, match="schreibgeschützt"):
+            plan_relationship(test_schema, shop("artikel"), shop("kunde"))
+        no_pk = add_table(model, shop("log"), Table("log", [Column("text", "text")]))
+        with pytest.raises(EditError, match="keinen Primärschlüssel"):
+            plan_relationship(no_pk, shop("artikel"), shop("log"))
+
+    def test_plan_changes_nothing(self, model):
+        before = document_to_dict(DiagramDocument(model))
+        plan_relationship(model, shop("artikel"), shop("kunde"))
+        assert document_to_dict(DiagramDocument(model)) == before
+
+    def test_delete_relationship_with_columns(self, model):
+        d, plan = add_relationship(model, shop("artikel"), shop("kategorie"), one_to_one=True, identifying=True)
+        d = delete_relationship(d, shop("artikel"), plan.fk_name)
+        t = d.find_table(shop("artikel"))
+        assert t.column("kategorie_id") is None
+        assert t.primary_key_columns == ("id",)
+        assert all(i.name != plan.unique_index for i in t.indexes)
+        assert d.validate() == []
+
+    def test_delete_relationship_keep_columns(self, model):
+        d = delete_relationship(model, shop("bestellung"), "fk_bestellung_kunde", drop_columns=False)
+        t = d.find_table(shop("bestellung"))
+        assert t.column("kunde_id") is not None
+        assert all(fk.name != "fk_bestellung_kunde" for fk in t.foreign_keys)
+
+    def test_delete_keeps_columns_used_by_other_fk(self, model):
+        # zweiter FK über dieselbe Spalte kunde_id
+        d = _clone_with_second_fk(model)
+        d = delete_relationship(d, shop("bestellung"), "fk_bestellung_kunde")
+        assert d.find_table(shop("bestellung")).column("kunde_id") is not None
+
+
+def _clone_with_second_fk(diagram):
+    import copy
+
+    from erd_editor.model import ForeignKey
+
+    d = copy.deepcopy(diagram)
+    d.find_table(shop("bestellung")).foreign_keys.append(ForeignKey("fk_zwei", ("kunde_id",), shop("kunde"), ("id",)))
+    return d

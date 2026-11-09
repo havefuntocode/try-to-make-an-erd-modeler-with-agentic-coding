@@ -12,9 +12,9 @@ entfernte Spalten oder Tabellen entfallen.
 from __future__ import annotations
 
 import copy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
-from erd_editor.model.schema import Database, Diagram, Dialect, ForeignKey, Index, Schema, Table, TableRef
+from erd_editor.model.schema import Column, Database, Diagram, Dialect, ForeignKey, Index, IndexKind, Schema, Table, TableRef
 from erd_editor.model.types import DEFAULT_SCHEMAS
 
 
@@ -175,3 +175,120 @@ def _remap_fks(fks: list[ForeignKey], mapping) -> list[ForeignKey]:
             fk.columns = cols
             result.append(fk)
     return result
+
+
+# ---------------------------------------------------------------------- Beziehungen
+
+
+@dataclass(frozen=True)
+class RelationshipPlan:
+    """Was `add_relationship` anlegen würde (auch für die Vorschau im Dialog)."""
+
+    fk_name: str
+    columns: tuple[Column, ...]  # neue FK-Spalten in der Kindtabelle
+    referenced_columns: tuple[str, ...]  # PK-Spalten der Elterntabelle
+    unique_index: str | None  # Name des UNIQUE-Index bei 1:1
+    adds_to_primary_key: bool
+
+
+def _unique(name: str, taken: set[str]) -> str:
+    if name not in taken:
+        return name
+    n = 2
+    while f"{name}_{n}" in taken:
+        n += 1
+    return f"{name}_{n}"
+
+
+def plan_relationship(
+    diagram: Diagram,
+    child: TableRef,
+    parent: TableRef,
+    one_to_one: bool = False,
+    identifying: bool = False,
+    mandatory: bool = True,
+) -> RelationshipPlan:
+    """Fremdschlüssel von `child` auf `parent` planen, ohne etwas zu ändern.
+
+    FK-Spalten heißen wie die PK-Spalten der Elterntabelle; `id` wird zu
+    `<eltern>_id`. Bei Namenskonflikten wird hochgezählt (`kunde_id_2`).
+    """
+    if not is_editable(diagram, child.database):
+        raise EditError(f"Datenbank {child.database!r} ist eingelesen und schreibgeschützt")
+    if child.database != parent.database:
+        raise EditError("Beziehungen sind nur innerhalb einer Datenbank möglich")
+    child_table, parent_table = diagram.find_table(child), diagram.find_table(parent)
+    if child_table is None or parent_table is None:
+        raise EditError("Tabelle nicht gefunden")
+    pk = parent_table.primary_key_columns
+    if not pk:
+        raise EditError(f"Tabelle {parent.table!r} hat keinen Primärschlüssel – darauf kann kein Fremdschlüssel zeigen")
+    if identifying and child == parent:
+        raise EditError("Eine Selbstreferenz kann nicht identifizierend sein")
+
+    taken = {c.name for c in child_table.columns}
+    columns = []
+    for name in pk:
+        source = parent_table.column(name)
+        base = f"{parent.table}_{name}" if name == "id" or child == parent else name
+        new_name = _unique(base, taken)
+        taken.add(new_name)
+        columns.append(Column(new_name, source.data_type, nullable=not (mandatory or identifying)))
+
+    fk_names = {fk.name for ref, t in diagram.tables() if ref.database == child.database for fk in t.foreign_keys}
+    fk_name = _unique(f"fk_{child.table}_{parent.table}", fk_names)
+    index_names = {i.name for i in child_table.indexes}
+    unique_index = _unique(f"uq_{child.table}_{parent.table}", index_names) if one_to_one else None
+    return RelationshipPlan(fk_name, tuple(columns), pk, unique_index, identifying)
+
+
+def add_relationship(
+    diagram: Diagram,
+    child: TableRef,
+    parent: TableRef,
+    one_to_one: bool = False,
+    identifying: bool = False,
+    mandatory: bool = True,
+) -> tuple[Diagram, RelationshipPlan]:
+    """Fremdschlüssel samt Spalten anlegen; liefert neues Diagramm und den Plan."""
+    plan = plan_relationship(diagram, child, parent, one_to_one, identifying, mandatory)
+    new = _clone(diagram)
+    table = new.find_table(child)
+    table.columns.extend(copy.deepcopy(list(plan.columns)))
+    new_cols = tuple(c.name for c in plan.columns)
+    if identifying:
+        pk = table.primary_key
+        if pk is None:
+            pk_name = "PRIMARY" if new.database(child.database).dialect is Dialect.MYSQL else f"{child.table}_pkey"
+            table.indexes.insert(0, Index(pk_name, IndexKind.PRIMARY, new_cols))
+        else:
+            table.indexes[table.indexes.index(pk)] = replace(pk, columns=pk.columns + new_cols)
+    if plan.unique_index:
+        table.indexes.append(Index(plan.unique_index, IndexKind.UNIQUE, new_cols))
+    table.foreign_keys.append(ForeignKey(plan.fk_name, new_cols, parent, plan.referenced_columns))
+    return new, plan
+
+
+def delete_relationship(diagram: Diagram, child: TableRef, fk_name: str, drop_columns: bool = True) -> Diagram:
+    """Fremdschlüssel entfernen; auf Wunsch auch seine Spalten (samt Indexen mit diesen Spalten)."""
+    if not is_editable(diagram, child.database):
+        raise EditError(f"Datenbank {child.database!r} ist eingelesen und schreibgeschützt")
+    new = _clone(diagram)
+    table = new.find_table(child)
+    fk = next((f for f in table.foreign_keys if f.name == fk_name), None) if table else None
+    if fk is None:
+        raise EditError(f"Fremdschlüssel {fk_name!r} gibt es nicht")
+    table.foreign_keys.remove(fk)
+    if drop_columns:
+        # nur Spalten entfernen, die kein anderer Fremdschlüssel braucht
+        still_used = {c for other in table.foreign_keys for c in other.columns}
+        drop = set(fk.columns) - still_used
+        table.columns = [c for c in table.columns if c.name not in drop]
+        kept = []
+        for index in table.indexes:
+            remaining = tuple(c for c in index.columns if c not in drop)
+            # PK schrumpft (bleibt, solange Spalten übrig sind); andere Indexe mit gelöschten Spalten entfallen
+            if remaining and (index.kind is IndexKind.PRIMARY or remaining == index.columns):
+                kept.append(replace(index, columns=remaining))
+        table.indexes = kept
+    return new

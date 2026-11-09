@@ -191,11 +191,12 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       (Name, Typ, NULL, Default, PK, Auto-Increment)
 - [ ] Indexe im Tabelleneditor bearbeiten (UNIQUE, INDEX, FULLTEXT …)
 - [x] Datentyp-Auswahl je Dialekt (nativ, ohne Mapping)
-- [ ] Beziehungs-Werkzeug: vom Kind zum Elternteil ziehen, 1:n/1:1 und
+- [x] Beziehungs-Werkzeug (Strg+B): vom Kind zum Elternteil ziehen, 1:n/1:1 und
       identifizierend/nicht-identifizierend wählen; FK-Spalten werden automatisch
       angelegt (Typ vom PK, bei identifizierend in den PK, bei 1:1 UNIQUE)
 - [x] Löschen und Umbenennen mit allen Folgen (abhängige FKs, Positionen, Teildiagramme)
-- [ ] Alle Bearbeitungen über Undo/Redo
+- [x] Beziehung löschen (Rechtsklick auf die Linie), mit oder ohne FK-Spalten
+- [x] Alle Bearbeitungen über Undo/Redo
 - [ ] Szene gezielt aktualisieren statt komplett neu aufbauen
 - [ ] SQL-Export (`CREATE TABLE …`) für MySQL
 
