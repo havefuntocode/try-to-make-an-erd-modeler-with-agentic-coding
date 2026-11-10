@@ -186,7 +186,8 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
 - [x] Datei → Neu; „Neue Datenbank (ohne Verbindung)“ mit Dialektwahl
 - [x] Modellierte und eingelesene Datenbanken unterscheiden: eingelesene bleiben
       schreibgeschützt; „Als Modell übernehmen“ macht die Datenbank selbst bearbeitbar
-      (Verbindung wird gelöst, „Neu einlesen“ lässt sie danach unverändert)
+      (Verbindung wird gelöst, „Neu einlesen“ lässt sie danach unverändert);
+      Bearbeitungsversuch an eingelesenen Datenbanken → Hinweisfenster „Schreibgeschützt“
 - [x] Entität anlegen/bearbeiten (Doppelklick): Name, Kommentar, Spalten
       (Name, Typ, NULL, Default, PK, Auto-Increment)
 - [x] Indexe im Tabelleneditor bearbeiten (UNIQUE, INDEX, FULLTEXT …): Reiter „Indexe“,

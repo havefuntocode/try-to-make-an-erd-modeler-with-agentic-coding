@@ -39,7 +39,10 @@ from erd_editor.ui.relationship_dialog import RelationshipDialog
 from erd_editor.ui.table_dialog import TableDialog
 
 DIALECT_LABELS = {Dialect.MYSQL: "MySQL", Dialect.POSTGRESQL: "PostgreSQL", Dialect.MSSQL: "SQL Server"}
-READ_ONLY_HINT = "Eingelesene Datenbank – schreibgeschützt. Modell → Als Modell übernehmen … macht sie bearbeitbar."
+READ_ONLY_HINT = (
+    "Die Datenbank „{name}“ wurde aus einer Datenbank eingelesen "
+    "und kann nicht verändert werden."
+)
 
 
 class DatabaseDialog(QDialog):
@@ -145,6 +148,10 @@ class ModelingMixin:
             QMessageBox.warning(self, "Nicht möglich", str(exc))
             return None
 
+    def _read_only_notice(self, database: str) -> None:
+        """Hinweisfenster: eingelesene Datenbanken sind schreibgeschützt."""
+        QMessageBox.information(self, "Schreibgeschützt", READ_ONLY_HINT.format(name=database))
+
     # ------------------------------------------------------------------ Datenbanken
 
     def new_database_dialog(self) -> None:
@@ -218,7 +225,7 @@ class ModelingMixin:
         if db is None or table is None:
             return
         if not db.modeled:
-            self.statusBar().showMessage(READ_ONLY_HINT)
+            self._read_only_notice(ref.database)
             return
         taken = {t.name for t in db.schema(ref.schema).tables}
         location = f"{ref.database}.{ref.schema}" if ref.schema else ref.database
@@ -264,7 +271,7 @@ class ModelingMixin:
 
     def on_relation_drawn(self, child: TableRef, parent: TableRef) -> None:
         if not self.document.diagram.database(child.database).modeled:
-            self.statusBar().showMessage(READ_ONLY_HINT)
+            self._read_only_notice(child.database)
             return
         dialog = RelationshipDialog(self.document.diagram, child, parent, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:

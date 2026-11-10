@@ -104,9 +104,14 @@ class TestEdit:
 
     def test_read_database_is_read_only(self, window, test_schema, monkeypatch):
         window.load_diagram(test_schema)
+        from PySide6.QtWidgets import QMessageBox
+
+        notices = []
+        monkeypatch.setattr(QMessageBox, "information", lambda *a: notices.append(a[1:3]))
         monkeypatch.setattr(TableDialog, "exec", lambda d: pytest.fail("Editor darf nicht öffnen"))
         window.edit_table(TableRef("shop", None, "kunde"))
-        assert "schreibgeschützt" in window.statusBar().currentMessage()
+        assert notices == [("Schreibgeschützt", "Die Datenbank „shop“ wurde aus einer Datenbank "
+                                                "eingelesen und kann nicht verändert werden.")]
 
     def test_take_over_makes_editable(self, window, test_schema):
         window.load_diagram(test_schema)
