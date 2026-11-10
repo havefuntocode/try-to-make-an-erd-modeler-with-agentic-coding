@@ -239,6 +239,11 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Die Anwendung selbst speichert Passwörter unter dem Dienst `erd-editor`
 - Tests, die ein echtes Menü oder einen Dialog öffnen würden, nicht mit `exec()` schreiben,
   sondern das Menü bauen und Aktionen direkt auslösen (sonst hängt der Testlauf)
+- Modale Dialoge nicht direkt aus einem Maus-Handler eines Szenen-Items öffnen, sondern
+  per `QTimer.singleShot(0, …)` danach – sonst bleibt das Item Mouse-Grabber und fängt
+  alle weiteren Klicks ab (siehe `EntityItem.mouseDoubleClickEvent`)
+- `QTest.mouseDClick` schickt nur das DblClick-Ereignis ohne vorheriges Drücken/Loslassen;
+  für realistische Doppelklicks `mousePress`, `mouseRelease`, `mouseDClick`, `mouseRelease`
 - Der Tabelleneditor liefert Indexe mit den **neuen** Spaltennamen
   (`replace_table(..., final_indexes=True)`), Fremdschlüssel mit den alten
 

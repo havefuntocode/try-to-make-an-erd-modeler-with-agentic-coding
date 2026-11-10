@@ -85,6 +85,23 @@ class TestEdit:
         table = modeled.document.diagram.find_table(ref("regal2"))
         assert [c.name for c in table.columns] == ["id", "hoehe"]
 
+    def test_real_double_click_opens_editor_and_releases_mouse(self, modeled, monkeypatch):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
+        opened = []
+        monkeypatch.setattr(TableDialog, "exec", lambda d: opened.append(d._original.name) or 0)
+        modeled.resize(1000, 700)
+        modeled.show()
+        item = modeled.scene.entities[ref("regal")]
+        modeled.view.centerOn(item)
+        pt = modeled.view.mapFromScene(item.sceneBoundingRect().center())
+        QTest.mouseDClick(modeled.view.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, pt)
+        assert opened == []  # Dialog erst nach dem Mausereignis
+        QTest.qWait(10)
+        assert opened == ["regal"]
+        assert modeled.scene.mouseGrabberItem() is None  # sonst träfe jeder weitere Doppelklick diese Box
+
     def test_read_database_is_read_only(self, window, test_schema, monkeypatch):
         window.load_diagram(test_schema)
         monkeypatch.setattr(TableDialog, "exec", lambda d: pytest.fail("Editor darf nicht öffnen"))

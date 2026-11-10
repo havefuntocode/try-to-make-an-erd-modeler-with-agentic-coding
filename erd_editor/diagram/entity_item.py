@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from html import escape
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QGraphicsItem,
@@ -42,6 +42,17 @@ class _IndexRow:
     kind: str
     label: str
     top: float
+
+
+def _activate(scene, ref: TableRef) -> None:
+    """Doppelklick nachträglich melden – Maus vorher freigeben (siehe `mouseDoubleClickEvent`)."""
+    try:
+        grabber = scene.mouseGrabberItem()
+    except RuntimeError:  # Szene inzwischen gelöscht
+        return
+    if grabber is not None:
+        grabber.ungrabMouse()
+    scene.entity_activated.emit(ref)
 
 
 def visible_columns(table: Table, mode: ColumnMode) -> list[Column]:
@@ -323,8 +334,12 @@ class EntityItem(QGraphicsObject):
     def mouseDoubleClickEvent(self, event) -> None:
         scene = self.scene()
         if scene is not None and hasattr(scene, "entity_activated"):
-            scene.entity_activated.emit(self.ref)
+            # Dialog erst nach dem Mausereignis öffnen: Ein modaler Dialog direkt hier
+            # schluckt das Loslassen, die Box bliebe Mouse-Grabber und jeder weitere
+            # Doppelklick träfe wieder sie. Außerdem baut eine Änderung die Szene neu
+            # auf – das darf nicht passieren, solange diese Box noch im Handler steckt.
             event.accept()
+            QTimer.singleShot(0, lambda s=scene, r=self.ref: _activate(s, r))
             return
         super().mouseDoubleClickEvent(event)
 
