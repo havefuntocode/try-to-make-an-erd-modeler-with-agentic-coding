@@ -224,10 +224,10 @@ class ModelingMixin:
         location = f"{ref.database}.{ref.schema}" if ref.schema else ref.database
         dialog = TableDialog(db.dialect, table, taken, location, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.update_table(ref, dialog.table(), dialog.column_renames())
+            self.update_table(ref, dialog.table(), dialog.column_renames(), final_indexes=True)
 
-    def update_table(self, ref: TableRef, table, renames: dict[str, str]) -> None:
-        diagram = self._try(lambda: replace_table(self.document.diagram, ref, table, renames))
+    def update_table(self, ref: TableRef, table, renames: dict[str, str], final_indexes: bool = False) -> None:
+        diagram = self._try(lambda: replace_table(self.document.diagram, ref, table, renames, final_indexes))
         if diagram is not None:
             new_ref = TableRef(ref.database, ref.schema, table.name)
             self.apply_model_change(diagram, f"Tabelle „{table.name}“ bearbeiten", renamed=(ref, new_ref))

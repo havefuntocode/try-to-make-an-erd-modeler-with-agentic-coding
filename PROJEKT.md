@@ -189,7 +189,8 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       (Verbindung wird gelöst, „Neu einlesen“ lässt sie danach unverändert)
 - [x] Entität anlegen/bearbeiten (Doppelklick): Name, Kommentar, Spalten
       (Name, Typ, NULL, Default, PK, Auto-Increment)
-- [ ] Indexe im Tabelleneditor bearbeiten (UNIQUE, INDEX, FULLTEXT …)
+- [x] Indexe im Tabelleneditor bearbeiten (UNIQUE, INDEX, FULLTEXT …): Reiter „Indexe“,
+      Spalten anhaken und ordnen; Umbenennen/Verschieben/Löschen von Spalten wird nachgezogen
 - [x] Datentyp-Auswahl je Dialekt (nativ, ohne Mapping)
 - [x] Beziehungs-Werkzeug (Strg+B): vom Kind zum Elternteil ziehen, 1:n/1:1 und
       identifizierend/nicht-identifizierend wählen; FK-Spalten werden automatisch
@@ -238,6 +239,8 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Die Anwendung selbst speichert Passwörter unter dem Dienst `erd-editor`
 - Tests, die ein echtes Menü oder einen Dialog öffnen würden, nicht mit `exec()` schreiben,
   sondern das Menü bauen und Aktionen direkt auslösen (sonst hängt der Testlauf)
+- Der Tabelleneditor liefert Indexe mit den **neuen** Spaltennamen
+  (`replace_table(..., final_indexes=True)`), Fremdschlüssel mit den alten
 
 ## 13. Offene Punkte
 

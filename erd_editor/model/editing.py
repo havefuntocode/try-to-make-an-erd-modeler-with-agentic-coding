@@ -87,6 +87,7 @@ def replace_table(
     ref: TableRef,
     table: Table,
     column_renames: dict[str, str] | None = None,
+    final_indexes: bool = False,
 ) -> Diagram:
     """Tabelle ersetzen (bearbeitet); Umbenennungen werden überall nachgezogen.
 
@@ -94,6 +95,9 @@ def replace_table(
     alte auf neue Spaltennamen ab. Spalten, die es in `table` nicht mehr
     gibt, gelten als gelöscht: Indexe und Fremdschlüssel mit diesen
     Spalten entfallen – auch Fremdschlüssel anderer Tabellen, die auf sie zeigen.
+
+    `final_indexes=True`: `table.indexes` nennen bereits die neuen
+    Spaltennamen (Tabelleneditor) und werden nicht umbenannt, nur geprüft.
     """
     if not is_editable(diagram, ref.database):
         raise EditError(f"Datenbank {ref.database!r} ist eingelesen und schreibgeschützt")
@@ -117,7 +121,16 @@ def replace_table(
     schema = _schema(new, ref.database, ref.schema)
     edited = copy.deepcopy(table)
     # eigene Indexe und FKs: Umbenennungen anwenden, gelöschte Spalten entfernen
-    edited.indexes = _remap_indexes(edited.indexes, map_own)
+    if final_indexes:
+        for index in edited.indexes:
+            unknown = [c for c in index.columns if c not in present]
+            if unknown or not index.columns:
+                raise EditError(f"Index {index.name!r} nennt unbekannte Spalten: {', '.join(unknown) or '(keine)'}")
+        index_names = [i.name for i in edited.indexes]
+        if len(index_names) != len(set(index_names)):
+            raise EditError("Indexnamen müssen eindeutig sein")
+    else:
+        edited.indexes = _remap_indexes(edited.indexes, map_own)
     edited.foreign_keys = _remap_fks(edited.foreign_keys, map_own)
     # Selbstreferenzen zeigen ggf. auf den neuen Namen
     for fk in edited.foreign_keys:
