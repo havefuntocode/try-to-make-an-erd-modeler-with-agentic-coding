@@ -26,7 +26,7 @@ Unterstützte Dialekte: **MySQL**, **PostgreSQL**, **Microsoft SQL Server**.
 | SQL Server | pyodbc |
 | Passwörter | `keyring` (Windows-Anmeldeinformationsverwaltung) |
 | Auto-Layout | networkx (Raster oder kraftbasiert) |
-| Icons | SVG über `QSvgRenderer` (Vorlagen: Tabler / Lucide, MIT/ISC) |
+| Icons | Eigene SVGs über `QSvgRenderer` (Diagramm: `resources/icons`, Symbolleiste: `resources/toolbar`, erzeugt mit `tools/make_toolbar_icons.py`) |
 | Drucken/PDF | `QPrinter`, `QPdfWriter`, Druckvorschau |
 | Auslieferung | PyInstaller (oder Nuitka) als Windows-`.exe` |
 | Entwicklung | VS Code mit Coding-Agent |

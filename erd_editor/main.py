@@ -457,7 +457,10 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         self.current_view = None
         self.show_view(None)
         problems = document.diagram.validate()
-        msg = f"{len(self.scene.entities)} Tabellen aus {len(document.diagram.databases)} Datenbank(en)"
+        views = sum(1 for _, t in document.diagram.tables() if t.is_view)
+        tables = sum(1 for _ in document.diagram.tables()) - views
+        msg = f"{tables} Tabellen" + (f", {views} View{'' if views == 1 else 's'}" if views else "")
+        msg += f" aus {len(document.diagram.databases)} Datenbank(en)"
         if problems:
             msg += f" – {len(problems)} Hinweis(e), z. B.: {problems[0]}"
         self.statusBar().showMessage(msg)
