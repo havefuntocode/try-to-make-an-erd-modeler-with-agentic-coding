@@ -263,6 +263,21 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Der Tabelleneditor liefert Indexe mit den **neuen** Spaltennamen
   (`replace_table(..., final_indexes=True)`), Fremdschlüssel mit den alten
 
+### Anwendungssymbol und späterer Build
+
+- Symbol: `erd_editor/resources/app.ico` (7 Größen ab 16×16), gesetzt per `app.setWindowIcon()` in `main.py`
+- Windows: eigene AppUserModelID (`ErdEditor.ErDiagrammEditor.App`) über
+  `SetCurrentProcessExplicitAppUserModelID`, vor dem ersten Fenster – sonst zeigt die
+  Taskleiste beim Start mit `python` das Python-Symbol
+- PyInstaller-Build (noch nicht eingerichtet): `--icon` setzt das Symbol der `.exe`
+  (Explorer), `--add-data` liefert die Ressourcen für Fenster und Diagramm mit:
+  ```
+  pyinstaller --windowed --name "ER-Diagramm-Editor" ^
+      --icon erd_editor/resources/app.ico ^
+      --add-data "erd_editor/resources;erd_editor/resources" ^
+      erd_editor/main.py
+  ```
+
 ## 13. Offene Punkte
 
 - Endgültiger Projektname

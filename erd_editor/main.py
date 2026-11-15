@@ -15,7 +15,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QDate, QLibraryInfo, QLocale, QTimer, QTranslator
 from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence, QUndoStack
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -721,6 +721,33 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
             event.ignore()
 
 
+APP_ICON = Path(__file__).resolve().parent / "resources" / "app.ico"
+# Eigene AppUserModelID: Die Taskleiste zeigt dann unser Symbol statt des Python-Symbols
+# und gruppiert die Fenster nicht unter python.exe (Format Firma.Produkt.Teil).
+APP_USER_MODEL_ID = "ErdEditor.ErDiagrammEditor.App"
+
+
+def app_icon() -> QIcon:
+    """Anwendungssymbol (alle Größen aus der .ico); leer, falls die Datei fehlt."""
+    return QIcon(str(APP_ICON)) if APP_ICON.is_file() else QIcon()
+
+
+def set_app_user_model_id(app_id: str = APP_USER_MODEL_ID) -> bool:
+    """Unter Windows eine eigene AppUserModelID für diesen Prozess setzen.
+
+    Muss vor dem Anlegen des ersten Fensters geschehen. Auf anderen
+    Systemen (oder wenn der Aufruf scheitert) passiert nichts.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        return ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id) == 0  # S_OK
+    except (AttributeError, OSError):
+        return False
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv if argv is None else argv
     parser = argparse.ArgumentParser(prog="erd_editor")
@@ -729,7 +756,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="mit --mysql: einzulesende Datenbanken, sonst eine Diagrammdatei")
     args = parser.parse_args(argv[1:])
 
+    set_app_user_model_id()  # vor dem ersten Fenster, sonst gruppiert Windows unter python.exe
     app = QApplication(argv)
+    app.setWindowIcon(app_icon())
     # Qt-eigene Texte (Standardknöpfe, Dateidialog) auf Deutsch
     translator = QTranslator(app)
     if translator.load(QLocale(QLocale.Language.German), "qtbase", "_", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
