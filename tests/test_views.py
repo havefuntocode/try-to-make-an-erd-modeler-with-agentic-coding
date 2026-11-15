@@ -193,3 +193,53 @@ def test_update_keeps_dependency_items(scene, diagram):
     assert scene.update_diagram(new)
     assert scene.dependencies == first[:2]  # dieselben Objekte, nur eine Linie weniger
     assert len([i for i in scene.items() if i.__class__.__name__ == "DependencyItem"]) == 2
+
+
+# ------------------------------------------------------------------ SQL-Export
+
+
+def test_ddl_views_after_tables_in_dependency_order(diagram):
+    from erd_editor.export.ddl import generate_statements
+
+    db = diagram.databases[0]
+    # v_alles steht in der Liste vor v_kunde, benutzt sie aber
+    schema = db.schemas[0]
+    schema.tables = [t for t in schema.tables if t.name != "v_kunde"] + [schema.table("v_kunde")]
+    stmts = generate_statements(db)
+    creates = [s.split()[2] for s in stmts if s.startswith("CREATE VIEW")]
+    assert creates == ["`v_kunde`", "`v_alles`"]
+    last_table = max(i for i, s in enumerate(stmts) if s.startswith(("CREATE TABLE", "ALTER TABLE")))
+    assert all(i > last_table for i, s in enumerate(stmts) if s.startswith("CREATE VIEW"))
+    assert not any("CREATE TABLE `v_" in s for s in stmts)
+
+
+@pytest.mark.parametrize("dialect", [Dialect.MYSQL, Dialect.POSTGRESQL, Dialect.MSSQL])
+def test_ddl_drop_views_first_in_reverse_order(diagram, dialect):
+    from erd_editor.export.ddl import DdlOptions, generate_statements
+
+    db = diagram.databases[0]
+    db.dialect = dialect
+    stmts = generate_statements(db, DdlOptions(drop_existing=True))
+    drops = [s for s in stmts if s.startswith("DROP VIEW")]
+    assert "v_alles" in drops[0] and "v_kunde" in drops[1]
+    assert stmts.index(drops[-1]) < min(i for i, s in enumerate(stmts) if s.startswith("DROP TABLE"))
+
+
+def test_ddl_view_comments_and_missing_text():
+    from erd_editor.export.ddl import generate_statements
+
+    v = Table("v", kind=TableKind.VIEW, definition="SELECT 1;", comment="Sicht")
+    empty = Table("leer", kind=TableKind.VIEW)
+    for dialect, expected in ((Dialect.POSTGRESQL, "COMMENT ON VIEW"), (Dialect.MSSQL, "N'VIEW', N'v'")):
+        db = Database("x", dialect, [Schema("s", [v, empty])])
+        stmts = generate_statements(db)
+        assert any(expected in s for s in stmts)
+        create = next(s for s in stmts if s.startswith("CREATE VIEW"))
+        assert create.endswith("AS\nSELECT 1")  # Semikolon entfernt
+        assert "-- View leer: kein SQL-Text vorhanden" in stmts
+
+
+def test_script_header_counts_views(diagram):
+    from erd_editor.export.ddl import generate_script
+
+    assert "2 Tabellen, 2 Views" in generate_script(diagram)

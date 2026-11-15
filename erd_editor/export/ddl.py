@@ -1,8 +1,10 @@
 """SQL-Export: `CREATE`-Skripte für MySQL, PostgreSQL und SQL Server.
 
 Datentypen sind nativ gespeichert und werden unverändert übernommen.
-Fremdschlüssel kommen am Ende als `ALTER TABLE … ADD CONSTRAINT`, damit
-die Reihenfolge der Tabellen keine Rolle spielt (auch bei Zyklen).
+Fremdschlüssel kommen nach den Tabellen als `ALTER TABLE … ADD CONSTRAINT`,
+damit die Reihenfolge der Tabellen keine Rolle spielt (auch bei Zyklen).
+Views folgen zum Schluss, sortiert nach ihren Abhängigkeiten; ihr SQL-Text
+wird unverändert übernommen (er ist dialektspezifisch).
 
 `generate_statements()` liefert einzelne Anweisungen (zum Ausführen),
 `generate_script()` ein lesbares Skript mit Kopf und Trennern.
@@ -93,9 +95,55 @@ def generate_statements(database: Database, options: DdlOptions = DdlOptions()) 
 
 
 def _tables(database: Database):
+    """Nur echte Tabellen; Views liefert `_views`."""
     for schema in database.schemas:
         for table in schema.tables:
-            yield schema.name, table
+            if not table.is_view:
+                yield schema.name, table
+
+
+def _views(database: Database) -> list[tuple[str | None, Table]]:
+    """Views so sortiert, dass benutzte Views vorher angelegt werden.
+
+    Zyklen (sollte es nicht geben) brechen ab, statt endlos zu laufen.
+    """
+    views = {TableRef(database.name, s.name, t.name): (s.name, t)
+             for s in database.schemas for t in s.tables if t.is_view}
+    ordered: list[tuple[str | None, Table]] = []
+    done: set[TableRef] = set()
+    visiting: set[TableRef] = set()
+
+    def visit(ref: TableRef) -> None:
+        if ref in done or ref in visiting:
+            return
+        visiting.add(ref)
+        for dep in views[ref][1].view_dependencies:
+            if dep in views:
+                visit(dep)
+        visiting.discard(ref)
+        done.add(ref)
+        ordered.append(views[ref])
+
+    for ref in views:
+        visit(ref)
+    return ordered
+
+
+def _view_body(table: Table) -> str | None:
+    return (table.definition or "").strip().removesuffix(";").rstrip() or None
+
+
+def _create_views(database: Database, full, comment) -> list[str]:
+    """`CREATE VIEW` je View (Dialekt über `full`/`comment`); Views ohne Text als Hinweis."""
+    out: list[str] = []
+    for schema, view in _views(database):
+        body = _view_body(view)
+        if body is None:
+            out.append(f"-- View {view.name}: kein SQL-Text vorhanden")
+            continue
+        out.append(f"CREATE VIEW {full(schema, view.name)} AS\n{body}")
+        out += comment(schema, view)
+    return out
 
 
 # ---------------------------------------------------------------------- MySQL
@@ -110,6 +158,7 @@ def _mysql(db: Database, o: DdlOptions) -> list[str]:
         out.append(f"CREATE DATABASE IF NOT EXISTS {q(db.name)}{charset}{collate}")
     out.append(f"USE {q(db.name)}")
     if o.drop_existing:
+        out += [f"DROP VIEW IF EXISTS {q(v.name)}" for _, v in reversed(_views(db))]
         out.append("SET FOREIGN_KEY_CHECKS = 0")
         out += [f"DROP TABLE IF EXISTS {q(t.name)}" for _, t in _tables(db)]
         out.append("SET FOREIGN_KEY_CHECKS = 1")
@@ -126,6 +175,8 @@ def _mysql(db: Database, o: DdlOptions) -> list[str]:
             out.append(f"ALTER TABLE {q(table.name)} ADD CONSTRAINT {q(fk.name)} FOREIGN KEY "
                        f"({_cols(Dialect.MYSQL, fk.columns)}) REFERENCES {target} "
                        f"({_cols(Dialect.MYSQL, fk.referenced_columns)}){_rules(fk)}")
+    # MySQL kennt keine Kommentare für Views
+    out += _create_views(db, lambda _schema, name: q(name), lambda _schema, _view: [])
     return out
 
 
@@ -166,6 +217,7 @@ def _postgres(db: Database, o: DdlOptions) -> list[str]:
     if o.create_database:
         out += [f"CREATE SCHEMA IF NOT EXISTS {q(s.name)}" for s in db.schemas if s.name and s.name != "public"]
     if o.drop_existing:
+        out += [f"DROP VIEW IF EXISTS {full(s, v.name)} CASCADE" for s, v in reversed(_views(db))]
         out += [f"DROP TABLE IF EXISTS {full(s, t.name)} CASCADE" for s, t in _tables(db)]
     for schema, table in _tables(db):
         registry = names.setdefault(schema, _Names())
@@ -205,6 +257,13 @@ def _postgres(db: Database, o: DdlOptions) -> list[str]:
             out.append(f"ALTER TABLE {full(schema, table.name)} ADD CONSTRAINT {q(registry.take(fk.name))} "
                        f"FOREIGN KEY ({_cols(d, fk.columns)}) REFERENCES {target} "
                        f"({_cols(d, fk.referenced_columns)}){_rules(fk)}")
+
+    def view_comment(schema, view) -> list[str]:
+        if o.comments and view.comment:
+            return [f"COMMENT ON VIEW {full(schema, view.name)} IS {literal(view.comment)}"]
+        return []
+
+    out += _create_views(db, full, view_comment)
     return out
 
 
@@ -238,6 +297,7 @@ def _mssql(db: Database, o: DdlOptions) -> list[str]:
                 object_name = literal(q(s or "dbo") + "." + q(fk.name), d)
                 out.append(f"IF OBJECT_ID({object_name}, N'F') IS NOT NULL "
                            f"ALTER TABLE {full(s, t.name)} DROP CONSTRAINT {q(fk.name)}")
+        out += [f"DROP VIEW IF EXISTS {full(s, v.name)}" for s, v in reversed(_views(db))]
         out += [f"DROP TABLE IF EXISTS {full(s, t.name)}" for s, t in _tables(db)]
     for schema, table in _tables(db):
         registry = names.setdefault(schema, _Names())
@@ -282,6 +342,14 @@ def _mssql(db: Database, o: DdlOptions) -> list[str]:
             out.append(f"ALTER TABLE {full(schema, table.name)} ADD CONSTRAINT {q(registry.take(fk.name))} "
                        f"FOREIGN KEY ({_cols(d, fk.columns)}) REFERENCES {target} "
                        f"({_cols(d, fk.referenced_columns)}){_rules(fk)}")
+
+    def view_comment(schema, view) -> list[str]:
+        if o.comments and view.comment:
+            return [f"EXEC sp_addextendedproperty N'MS_Description', {literal(view.comment, d)}, "
+                    f"N'SCHEMA', {literal(schema or 'dbo', d)}, N'VIEW', {literal(view.name, d)}"]
+        return []
+
+    out += _create_views(db, full, view_comment)
     return out
 
 
@@ -309,8 +377,10 @@ def generate_script(diagram: Diagram, databases: list[str] | None = None, option
     chosen = [db for db in diagram.databases if databases is None or db.name in databases]
     parts = [f"-- Erzeugt mit dem ER-Diagramm-Editor am {date.today().strftime('%d.%m.%Y')}"]
     for db in chosen:
-        tables = sum(len(s.tables) for s in db.schemas)
-        parts.append(f"\n-- ===== {db.name} ({DIALECT_NAMES[db.dialect]}, {tables} Tabellen) =====\n")
+        tables = sum(1 for _ in _tables(db))
+        views = len(_views(db))
+        count = f"{tables} Tabellen" + (f", {views} View{'' if views == 1 else 's'}" if views else "")
+        parts.append(f"\n-- ===== {db.name} ({DIALECT_NAMES[db.dialect]}, {count}) =====\n")
         if db.dialect is Dialect.POSTGRESQL and options.create_database:
             parts.append(f"-- Datenbank vorher anlegen und verbinden:\n--   CREATE DATABASE {quote(db.dialect, db.name)};\n"
                          f"--   \\connect {db.name}\n")

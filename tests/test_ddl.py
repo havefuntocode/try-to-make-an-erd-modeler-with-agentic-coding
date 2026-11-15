@@ -121,6 +121,8 @@ def renamed(db: Database, name: str) -> Database:
             for fk in table.foreign_keys:
                 if fk.referenced_table.database == old:
                     fk.referenced_table = TableRef(name, fk.referenced_table.schema, fk.referenced_table.table)
+            table.view_dependencies = [TableRef(name, d.schema, d.table) if d.database == old else d
+                                       for d in table.view_dependencies]
     return new
 
 
@@ -132,7 +134,10 @@ def shape(db: Database):
             cols = [(c.name, c.data_type, c.nullable, c.auto_increment, None if c.auto_increment else c.default, c.comment)
                     for c in t.columns]
             idx = sorted((i.name, i.kind.value, i.columns) for i in t.indexes)
-            tables[(schema.name, t.name)] = (cols, t.primary_key_columns, idx, t.comment)
+            # Views: Art und benutzte Objekte (eigene Datenbank ohne Namen, fremde mit)
+            deps = sorted(("" if d.database == db.name else d.database, d.schema or "", d.table)
+                          for d in t.view_dependencies)
+            tables[(schema.name, t.name)] = (cols, t.primary_key_columns, idx, t.comment, t.kind.value, deps)
     rels = sorted(
         (r.name, r.child.table, r.parent.table, r.foreign_key.columns, r.identifying, str(r.parent_end), str(r.child_end))
         for r in derive_relationships(Diagram([db]))
