@@ -199,7 +199,9 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
 - [x] Löschen und Umbenennen mit allen Folgen (abhängige FKs, Positionen, Teildiagramme)
 - [x] Beziehung löschen (Rechtsklick auf die Linie), mit oder ohne FK-Spalten
 - [x] Alle Bearbeitungen über Undo/Redo
-- [ ] Szene gezielt aktualisieren statt komplett neu aufbauen
+- [x] Szene gezielt aktualisieren statt komplett neu aufbauen
+      (Bearbeiten, Rückgängig, Neu einlesen: nur geänderte Boxen und Linien;
+      Auswahl und Bildausschnitt bleiben)
 - [x] SQL-Export (`CREATE TABLE …`) für MySQL, PostgreSQL und SQL Server
       (Roundtrip-Test gegen alle drei Server: Skript ausführen, wieder einlesen, gleiches Schema)
 
@@ -248,6 +250,9 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
   alle weiteren Klicks ab (siehe `EntityItem.mouseDoubleClickEvent`)
 - `QTest.mouseDClick` schickt nur das DblClick-Ereignis ohne vorheriges Drücken/Loslassen;
   für realistische Doppelklicks `mousePress`, `mouseRelease`, `mouseDClick`, `mouseRelease`
+- Modelländerungen, Rückgängig und Neu einlesen laufen über `show_view(..., keep_view=True)`
+  → `DiagramScene.update_diagram()`; nur bei geänderten Datenbanken/Schemas/Farben/
+  Darstellungsgröße wird über `load()` komplett neu aufgebaut
 - Der Tabelleneditor liefert Indexe mit den **neuen** Spaltennamen
   (`replace_table(..., final_indexes=True)`), Fremdschlüssel mit den alten
 

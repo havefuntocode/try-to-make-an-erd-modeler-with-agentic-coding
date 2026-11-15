@@ -58,6 +58,7 @@ class DiagramScene(QGraphicsScene):
         self.display_options = DisplayOptions()
         self._gesture_before: Layout | None = None
         self.overrides: dict[RelationshipKey, RelationshipOverride] = {}
+        self._base_style = EntityStyle()
         self.selectionChanged.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------ Aufbau
@@ -88,57 +89,203 @@ class DiagramScene(QGraphicsScene):
                 self.notation = notation_for(layout.notation)
             self.display_scale = min(max(layout.scale, MIN_SCALE), MAX_SCALE)
             self.display_options = layout.display
-        base_style = style or EntityStyle()
+        self._base_style = style or EntityStyle()
         colors_by_db = self._assign_colors(diagram, layout.database_colors if layout else {})
         for database in diagram.databases:
-            color_index = colors_by_db[database.name]
-            colors = colors_for(color_index)
-            container = ContainerItem(database, colors, color_index, self.display_scale)
-            self.addItem(container)
-            self.containers[database.name] = container
-            # Entitäten übernehmen den Farbton ihrer Datenbank
-            db_style = replace(base_style, header=colors.qcolor("entity_header"), border=colors.qcolor("border"))
+            container = self._add_container(database, colors_by_db[database.name])
             for schema in database.schemas:
-                schema_item = None
                 if schema.name is not None:  # MySQL: keine Schemaebene
-                    schema_item = SchemaItem(database, schema, colors, self.display_scale)
-                    self.addItem(schema_item)
-                    self.schema_items[(database.name, schema.name)] = schema_item
-                    container.schemas.append(schema_item)
+                    self._add_schema_item(container, database, schema)
                 for table in schema.tables:
-                    ref = TableRef(database.name, schema.name, table.name)
-                    item = EntityItem(ref, table, db_style, self.display_options)
-                    item.setScale(self.display_scale)
-                    self.addItem(item)
-                    self.entities[ref] = item
-                    container.members.append(item)
-                    if schema_item is not None:
-                        schema_item.members.append(item)
+                    self._add_entity(TableRef(database.name, schema.name, table.name), table)
         self._build_relations()
         if layout is None:
             self.auto_layout(notify=False)
         else:
             self._apply_layout(layout)
-            for name, frame in layout.frames.items():
-                if name in self.containers:
-                    self.containers[name].manual_rect = QRectF(*frame)
-            for key, frame in layout.schema_frames.items():
-                if key in self.schema_items:
-                    self.schema_items[key].manual_rect = QRectF(*frame)
-            self.update_containers()
+            self._apply_frames(layout)
+
+    def _add_container(self, database, color_index: int) -> ContainerItem:
+        container = ContainerItem(database, colors_for(color_index), color_index, self.display_scale)
+        self.addItem(container)
+        self.containers[database.name] = container
+        return container
+
+    def _add_schema_item(self, container: ContainerItem, database, schema) -> SchemaItem:
+        schema_item = SchemaItem(database, schema, container.colors, self.display_scale)
+        self.addItem(schema_item)
+        self.schema_items[(database.name, schema.name)] = schema_item
+        container.schemas.append(schema_item)
+        return schema_item
+
+    def _entity_style(self, container: ContainerItem) -> EntityStyle:
+        """Entitäten übernehmen den Farbton ihrer Datenbank."""
+        colors = container.colors
+        return replace(self._base_style, header=colors.qcolor("entity_header"), border=colors.qcolor("border"))
+
+    def _add_entity(self, ref: TableRef, table) -> EntityItem:
+        container = self.containers[ref.database]
+        item = EntityItem(ref, table, self._entity_style(container), self.display_options)
+        item.setScale(self.display_scale)
+        self.addItem(item)
+        self.entities[ref] = item
+        container.members.append(item)
+        schema_item = self.schema_items.get((ref.database, ref.schema)) if ref.schema is not None else None
+        if schema_item is not None:
+            schema_item.members.append(item)
+        return item
+
+    def _remove_entity(self, ref: TableRef) -> None:
+        item = self.entities.pop(ref)
+        for frame in self.frames():
+            if item in frame.members:
+                frame.members.remove(item)
+        self.removeItem(item)
+
+    def _apply_frames(self, layout: Layout) -> None:
+        """Von Hand aufgezogene Rahmen aus dem Layout übernehmen."""
+        for name, container in self.containers.items():
+            frame = layout.frames.get(name)
+            container.manual_rect = QRectF(*frame) if frame else None
+        for key, schema in self.schema_items.items():
+            frame = layout.schema_frames.get(key)
+            schema.manual_rect = QRectF(*frame) if frame else None
+        self.update_containers()
+
+    def _derived_relationships(self) -> list:
+        if self.diagram is None:
+            return []
+        return apply_overrides(derive_relationships(self.diagram), self.overrides)
 
     def _build_relations(self) -> None:
         """Linien aus dem Diagramm ableiten (mit Überschreibungen) und anlegen."""
         for item in self.relations:
             self.removeItem(item)
-        self.relations = []
-        if self.diagram is None:
-            return
-        for rel in apply_overrides(derive_relationships(self.diagram), self.overrides):
-            item = RelationItem(rel, self.entities[rel.child], self.entities[rel.parent], self.notation)
-            item.scale_factor = self.display_scale
-            self.addItem(item)
-            self.relations.append(item)
+        self.relations = [self._new_relation(rel) for rel in self._derived_relationships()]
+        self._apply_entity_corners()
+
+    def _new_relation(self, rel) -> RelationItem:
+        item = RelationItem(rel, self.entities[rel.child], self.entities[rel.parent], self.notation)
+        item.scale_factor = self.display_scale
+        self.addItem(item)
+        return item
+
+    # ------------------------------------------------------------------ Gezielt aktualisieren
+
+    def update_diagram(
+        self,
+        diagram: Diagram,
+        layout: Layout | None = None,
+        overrides: dict[RelationshipKey, RelationshipOverride] | None = None,
+        renamed: dict[TableRef, TableRef] | None = None,
+    ) -> bool:
+        """Szene an ein geändertes Diagramm anpassen, ohne sie neu aufzubauen.
+
+        Nur gelöschte Tabellen verschwinden, geänderte werden neu berechnet,
+        neue kommen hinzu; Linien werden nur dort ersetzt, wo sich die
+        Beziehung oder eine ihrer Boxen geändert hat. Auswahl und
+        Bildausschnitt bleiben so erhalten.
+
+        `layout` liefert Positionen und Rahmen (wie bei `load`); ohne
+        `layout` behalten vorhandene Tabellen ihre Position und neue werden
+        unter die vorhandenen gesetzt. `renamed` (alt → neu) lässt
+        umbenannte Tabellen ihre Box behalten.
+
+        Ändern sich Datenbanken, Schemas, Farben, Darstellungsgröße,
+        -optionen oder Notation, wird komplett neu aufgebaut (`load`).
+        Liefert True, wenn gezielt aktualisiert wurde.
+        """
+        overrides = dict(overrides if overrides is not None else self.overrides)
+        if not self._can_update(diagram, layout):
+            self.load(diagram, layout, self._base_style, overrides)
+            return False
+        self.diagram = diagram
+        self.overrides = overrides
+
+        # Datenbank- und Schema-Rahmen: nur die Beschreibung tauschen
+        for database in diagram.databases:
+            container = self.containers[database.name]
+            container.database = database
+            for schema in database.schemas:
+                schema_item = self.schema_items.get((database.name, schema.name))
+                if schema_item is not None:
+                    schema_item.database, schema_item.schema = database, schema
+            for frame in [container, *container.schemas]:
+                frame.setToolTip(frame._tooltip())
+                frame.update()
+
+        # Tabellen: umbenennen, entfernen, aktualisieren, hinzufügen
+        tables = {
+            TableRef(db.name, s.name, t.name): t for db in diagram.databases for s in db.schemas for t in s.tables
+        }
+        for old, new in (renamed or {}).items():
+            if old != new and old in self.entities and old not in tables and new in tables and new not in self.entities:
+                item = self.entities.pop(old)
+                item.set_table(item.table, new)
+                self.entities[new] = item
+        for ref in [r for r in self.entities if r not in tables]:
+            self._remove_entity(ref)
+        known = {ref: (item.pos().x(), item.pos().y()) for ref, item in self.entities.items()}
+        for ref, table in tables.items():
+            item = self.entities.get(ref)
+            if item is None:
+                self._add_entity(ref, table)
+            else:
+                item.set_table(table)  # Linien lesen die Spaltenlage beim Führen neu
+        # Reihenfolge wie im Diagramm (Auto-Layout, Export)
+        self.entities = {ref: self.entities[ref] for ref in tables}
+
+        self._sync_relations()
+
+        if layout is None:  # bekannte Positionen behalten, neue Tabellen platzieren
+            layout = replace(self.current_layout(), positions=known)
+        self._apply_layout(layout)
+        self._apply_frames(layout)
+        return True
+
+    def _can_update(self, diagram: Diagram, layout: Layout | None) -> bool:
+        """Lässt sich gezielt aktualisieren (gleiche Datenbanken, Schemas, Farben, Darstellung)?"""
+        old = self.diagram
+        if old is None:
+            return False
+        if [db.name for db in old.databases] != [db.name for db in diagram.databases]:
+            return False
+        for old_db, new_db in zip(old.databases, diagram.databases):
+            if [s.name for s in old_db.schemas] != [s.name for s in new_db.schemas]:
+                return False
+        if layout is not None:
+            colors = self._assign_colors(diagram, layout.database_colors)
+            if any(self.containers[name].color_index != index for name, index in colors.items()):
+                return False
+            if (abs(layout.scale - self.display_scale) > 1e-9 or layout.display != self.display_options
+                    or layout.notation != self.notation.key):
+                return False
+        return True
+
+    def _sync_relations(self) -> None:
+        """Linien abgleichen: unveränderte behalten, geänderte ersetzen, fehlende anlegen."""
+        reusable: dict[tuple, list[RelationItem]] = defaultdict(list)
+        for item in self.relations:
+            rel = item.relationship
+            alive = (self.entities.get(item.child_item.ref) is item.child_item
+                     and self.entities.get(item.parent_item.ref) is item.parent_item)
+            if alive:
+                reusable[(item.child_item.ref, rel.foreign_key.name)].append(item)
+            else:
+                self.removeItem(item)
+        relations: list[RelationItem] = []
+        for rel in self._derived_relationships():
+            candidates = reusable.get((rel.child, rel.foreign_key.name), [])
+            match = next((c for c in candidates if c.relationship == rel), None)
+            if match is not None:
+                candidates.remove(match)
+                relations.append(match)
+            else:
+                relations.append(self._new_relation(rel))
+        for leftovers in reusable.values():
+            for item in leftovers:
+                self.removeItem(item)
+        self.relations = relations
         self._apply_entity_corners()
 
     def _apply_entity_corners(self) -> None:

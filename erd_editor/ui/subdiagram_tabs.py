@@ -93,28 +93,45 @@ class SubdiagramTabsMixin:
             if sd is not None:
                 sd.layout = layout
 
-    def show_view(self, name: str | None) -> None:
-        """Ansicht anzeigen, ohne den bisherigen Zustand zu speichern."""
+    def show_view(self, name: str | None, keep_view: bool = False,
+                  renamed: dict[TableRef, TableRef] | None = None) -> None:
+        """Ansicht anzeigen, ohne den bisherigen Zustand zu speichern.
+
+        `keep_view=True` (nach Bearbeitungen, Rückgängig, Neu einlesen): Ist
+        dieselbe Ansicht schon zu sehen, wird die Szene nur gezielt
+        aktualisiert – Auswahl und Bildausschnitt bleiben. `renamed`
+        (alt → neu) lässt umbenannte Tabellen ihre Box behalten.
+        """
         if name is not None and self.document.subdiagram(name) is None:
             name = None
+        incremental = keep_view and name == self.current_view
         self.current_view = name
         if name is None:
-            # ohne Positionen ordnet die Szene automatisch an; Größe und Optionen gelten trotzdem
-            self.scene.load(self.document.diagram, self.document.layout, overrides=self.document.overrides)
-            self.document.layout = self.scene.current_layout()
+            diagram, layout = self.document.diagram, self.document.layout
         else:
             sd = self.document.subdiagram(name)
             colors = self.main_colors()
             if sd.layout is None:  # erstes Anzeigen: automatisch, aber mit Größe/Optionen von „Gesamt“
                 main = self.document.layout
-                start = Layout(database_colors=colors, scale=main.scale, display=main.display, notation=main.notation)
+                layout = Layout(database_colors=colors, scale=main.scale, display=main.display, notation=main.notation)
             else:
-                start = replace(sd.layout, database_colors=colors)
-            self.scene.load(filter_diagram(self.document.diagram, sd.tables), start, overrides=self.document.overrides)
+                layout = replace(sd.layout, database_colors=colors)
+            diagram = filter_diagram(self.document.diagram, sd.tables)
+        if incremental:
+            # ohne Positionen ordnet load() automatisch an – hier bleiben bekannte Boxen stehen
+            incremental = self.scene.update_diagram(diagram, layout if layout.positions else None,
+                                                    self.document.overrides, renamed)
+        else:
+            # ohne Positionen ordnet die Szene automatisch an; Größe und Optionen gelten trotzdem
+            self.scene.load(diagram, layout, overrides=self.document.overrides)
+        if name is None:
+            self.document.layout = self.scene.current_layout()
+        else:
             sd.layout = self.scene.current_layout()
         self.sync_tabs()
         self._sync_menus()
-        QTimer.singleShot(0, self.view.zoom_to_fit)
+        if not incremental:
+            QTimer.singleShot(0, self.view.zoom_to_fit)
 
     def activate_view(self, name: str | None) -> None:
         """In eine Ansicht wechseln (bisherigen Zustand vorher sichern)."""
@@ -174,7 +191,7 @@ class SubdiagramTabsMixin:
             [Subdiagram(sd.name, list(sd.tables), sd.layout) for sd in doc.subdiagrams],
             dict(doc.overrides),
         )
-        self.show_view(snap.view)
+        self.show_view(snap.view, keep_view=True)
 
     def record_document(self, before: Snapshot, text: str) -> None:
         from erd_editor.ui.commands import DocumentCommand

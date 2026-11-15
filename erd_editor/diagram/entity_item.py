@@ -76,8 +76,8 @@ def hidden_label(hidden: int, mode: ColumnMode) -> str:
 class EntityItem(QGraphicsObject):
     """Verschiebbare Box für eine Tabelle.
 
-    Die Geometrie wird beim Erzeugen und bei geänderten Darstellungsoptionen
-    berechnet; ändert sich die Tabelle selbst, wird ein neues Item erzeugt.
+    Die Geometrie wird beim Erzeugen, bei geänderten Darstellungsoptionen
+    und bei einer geänderten Tabelle (`set_table`) neu berechnet.
     """
 
     def __init__(
@@ -105,6 +105,17 @@ class EntityItem(QGraphicsObject):
             return
         self.prepareGeometryChange()
         self.options = options
+        self._compute_layout()
+        self.update()
+
+    def set_table(self, table: Table, ref: TableRef | None = None) -> None:
+        """Geänderte Tabelle übernehmen (ggf. mit neuem Namen); Position und Auswahl bleiben."""
+        if ref is not None:
+            self.ref = ref
+        if table == self.table:
+            return
+        self.prepareGeometryChange()
+        self.table = table
         self._compute_layout()
         self.update()
 

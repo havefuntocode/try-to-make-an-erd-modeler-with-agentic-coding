@@ -525,7 +525,7 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         self.document.connections = [c for c in self.document.connections if c.name != profile.name] + [profile]
         self.document.diagram = Diagram(merged)
         self.prune_subdiagrams(self.document.diagram)
-        self.show_view(self.current_view)
+        self.show_view(self.current_view, keep_view=True)
         self.record_document(before, "Datenbanken hinzufügen")
         self.statusBar().showMessage(describe_changes(old, self.document.diagram))
         self.setWindowModified(True)
@@ -564,7 +564,7 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         before = self.snapshot()
         self.document.diagram = new_diagram
         self.prune_subdiagrams(new_diagram)
-        self.show_view(self.current_view)
+        self.show_view(self.current_view, keep_view=True)
         self.record_document(before, "Neu einlesen")
         self.statusBar().showMessage(describe_changes(old, new_diagram))
         self.setWindowModified(True)

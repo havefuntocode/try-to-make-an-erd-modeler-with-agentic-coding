@@ -118,7 +118,7 @@ class ModelingMixin:
         if added is not None and self.current_view is not None:
             self.document.subdiagram(self.current_view).tables.append(added)  # neue Tabelle auch im Teildiagramm
         self.prune_subdiagrams(diagram)
-        self.show_view(self.current_view)
+        self.show_view(self.current_view, keep_view=True, renamed=dict([renamed]) if renamed else None)
         self.record_document(before, text)
         self.statusBar().showMessage(text)
 
