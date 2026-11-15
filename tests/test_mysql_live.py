@@ -1,16 +1,22 @@
-"""Live-Test gegen einen lokalen MySQL-Server mit eingespieltem Testschema.
+"""Live-Test gegen lokale MySQL- und MariaDB-Server mit eingespieltem Testschema.
+
+Beide Server werden über denselben Adapter gelesen und müssen dasselbe
+neutrale Modell liefern.
 
 Voraussetzungen:
-- tests/schema/mysql.sql ist eingespielt
-- Passwort entweder im keyring (einmalig, empfohlen):
-      .venv/Scripts/python -m keyring set erd-editor-test root
-  oder in der Umgebungsvariable ERD_MYSQL_PASSWORD
-- optional: ERD_MYSQL_USER (Standard root), ERD_MYSQL_HOST (localhost), ERD_MYSQL_PORT (3306)
+- tests/schema/mysql.sql ist im jeweiligen Server eingespielt
+- Passwort im keyring (einmalig, empfohlen):
+      .venv/Scripts/python -m keyring set erd-editor-test root           (MySQL)
+      .venv/Scripts/python -m keyring set erd-editor-test root@mariadb   (MariaDB)
+  oder in den Umgebungsvariablen ERD_MYSQL_PASSWORD / ERD_MARIADB_PASSWORD
+- optional: ERD_MYSQL_USER (Standard root), ERD_MYSQL_HOST (localhost),
+  ERD_MYSQL_PORT (3306), ERD_MARIADB_PORT (3307)
 
-Ohne Passwort wird der Test übersprungen.
+Ein Server ohne Passwort wird übersprungen.
 """
 
 import os
+from dataclasses import dataclass
 
 import keyring
 import pytest
@@ -22,38 +28,48 @@ from erd_editor.model import ConnectionProfile, Diagram, Dialect
 SHOP, MASTER = "erd_test_shop", "erd_test_stammdaten"
 KEYRING_SERVICE = "erd-editor-test"
 USER = os.environ.get("ERD_MYSQL_USER", "root")
+HOST = os.environ.get("ERD_MYSQL_HOST", "localhost")
 
 
-def _password() -> str | None:
-    if "ERD_MYSQL_PASSWORD" in os.environ:
-        return os.environ["ERD_MYSQL_PASSWORD"]
-    try:
-        return keyring.get_password(KEYRING_SERVICE, USER)
-    except keyring.errors.KeyringError:
-        return None
+@dataclass(frozen=True)
+class LiveServer:
+    """Ein lokaler Server der MySQL-Familie für die Live-Tests."""
+
+    id: str
+    port: int
+    keyring_account: str
+    password_env: str
+
+    def password(self) -> str | None:
+        if self.password_env in os.environ:
+            return os.environ[self.password_env]
+        try:
+            return keyring.get_password(KEYRING_SERVICE, self.keyring_account)
+        except keyring.errors.KeyringError:
+            return None
+
+    def profile(self) -> ConnectionProfile:
+        return ConnectionProfile("test", Dialect.MYSQL, host=HOST, port=self.port, user=USER)
 
 
-PASSWORD = _password()
+SERVERS = [
+    LiveServer("mysql", int(os.environ.get("ERD_MYSQL_PORT", "3306")), USER, "ERD_MYSQL_PASSWORD"),
+    LiveServer("mariadb", int(os.environ.get("ERD_MARIADB_PORT", "3307")), f"{USER}@mariadb",
+               "ERD_MARIADB_PASSWORD"),
+]
 
-pytestmark = pytest.mark.skipif(
-    PASSWORD is None,
-    reason=f"kein Passwort (keyring {KEYRING_SERVICE!r}/{USER!r} oder ERD_MYSQL_PASSWORD)",
-)
 
-
-@pytest.fixture(scope="module")
-def live() -> Diagram:
-    profile = ConnectionProfile(
-        "test",
-        Dialect.MYSQL,
-        host=os.environ.get("ERD_MYSQL_HOST", "localhost"),
-        port=int(os.environ.get("ERD_MYSQL_PORT", "3306")),
-        user=USER,
-    )
-    with MySqlAdapter(profile, PASSWORD) as adapter:
+@pytest.fixture(scope="module", params=SERVERS, ids=[s.id for s in SERVERS])
+def live(request) -> Diagram:
+    server: LiveServer = request.param
+    password = server.password()
+    if password is None:
+        pytest.skip(f"kein Passwort (keyring {KEYRING_SERVICE!r}/{server.keyring_account!r} "
+                    f"oder {server.password_env})")
+    with MySqlAdapter(server.profile(), password) as adapter:
         available = adapter.list_databases()
         if SHOP not in available or MASTER not in available:
-            pytest.skip("Testschema nicht eingespielt (tests/schema/mysql.sql)")
+            pytest.skip(f"Testschema nicht eingespielt in {server.id} (tests/schema/mysql.sql)")
         return Diagram([adapter.read_database(SHOP), adapter.read_database(MASTER)])
 
 

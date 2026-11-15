@@ -149,21 +149,26 @@ def keyring_password(user):
         return None
 
 
-def _mysql_roundtrip():
+def _mysql_family_roundtrip(account: str, port: int):
+    """Roundtrip für MySQL und MariaDB (gleicher Adapter, anderer Port/keyring-Eintrag)."""
     import pymysql
 
+    from erd_editor.adapters.base import AdapterError
     from erd_editor.adapters.mysql import MySqlAdapter
     from erd_editor.model import ConnectionProfile
 
-    pw = keyring_password("root")
+    pw = keyring_password(account)
     if pw is None:
-        pytest.skip("kein MySQL-Passwort")
-    profile = ConnectionProfile("t", Dialect.MYSQL, "localhost", None, "root")
-    with MySqlAdapter(profile, pw) as a:
-        if "erd_test_shop" not in a.list_databases():
-            pytest.skip("Testschema fehlt")
-        original = a.read_database("erd_test_shop")
-    conn = pymysql.connect(host="localhost", user="root", password=pw, autocommit=True)
+        pytest.skip(f"kein Passwort für {account}")
+    profile = ConnectionProfile("t", Dialect.MYSQL, "localhost", port, "root")
+    try:
+        with MySqlAdapter(profile, pw) as a:
+            if "erd_test_shop" not in a.list_databases():
+                pytest.skip("Testschema fehlt")
+            original = a.read_database("erd_test_shop")
+    except AdapterError as exc:
+        pytest.skip(f"Server nicht erreichbar: {exc}")
+    conn = pymysql.connect(host="localhost", port=port, user="root", password=pw, autocommit=True)
     try:
         with conn.cursor() as cur:
             cur.execute(f"DROP DATABASE IF EXISTS {TARGET}")
@@ -176,6 +181,14 @@ def _mysql_roundtrip():
             cur.execute(f"DROP DATABASE IF EXISTS {TARGET}")
         conn.close()
     return original, copy_db
+
+
+def _mysql_roundtrip():
+    return _mysql_family_roundtrip("root", 3306)
+
+
+def _mariadb_roundtrip():
+    return _mysql_family_roundtrip("root@mariadb", 3307)
 
 
 def _postgres_roundtrip():
@@ -243,8 +256,8 @@ def _mssql_roundtrip():
     return original, copy_db
 
 
-@pytest.mark.parametrize("roundtrip", [_mysql_roundtrip, _postgres_roundtrip, _mssql_roundtrip],
-                         ids=["mysql", "postgresql", "mssql"])
+@pytest.mark.parametrize("roundtrip", [_mysql_roundtrip, _mariadb_roundtrip, _postgres_roundtrip, _mssql_roundtrip],
+                         ids=["mysql", "mariadb", "postgresql", "mssql"])
 def test_roundtrip_against_real_server(roundtrip):
     """Skript erzeugen, ausführen, wieder einlesen: dasselbe Schema."""
     original, copy_db = roundtrip()

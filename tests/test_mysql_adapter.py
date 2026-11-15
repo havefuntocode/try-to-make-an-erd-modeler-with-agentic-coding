@@ -3,7 +3,12 @@
 import pytest
 
 from erd_editor.adapters.base import AdapterError
-from erd_editor.adapters.mysql import MySqlAdapter, build_database
+from erd_editor.adapters.mysql import (
+    MySqlAdapter,
+    build_database,
+    normalize_mariadb_default,
+    normalize_mariadb_type,
+)
 from erd_editor.model import ConnectionProfile, Dialect, IndexKind, TableRef
 
 
@@ -143,3 +148,57 @@ def test_query_without_connection_fails():
     adapter = MySqlAdapter(ConnectionProfile("lokal", Dialect.MYSQL, "localhost"))
     with pytest.raises(AdapterError):
         adapter.list_databases()
+
+
+# ------------------------------------------------------------------ MariaDB
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("int(11)", "int"),
+        ("bigint(20) unsigned", "bigint unsigned"),
+        ("smallint(6)", "smallint"),
+        ("tinyint(4)", "tinyint"),
+        ("tinyint(1)", "tinyint(1)"),  # BOOLEAN, auch bei MySQL 8 mit Breite
+        ("int(4) unsigned zerofill", "int(4) unsigned zerofill"),
+        ("decimal(5,2)", "decimal(5,2)"),
+        ("varchar(80)", "varchar(80)"),
+    ],
+)
+def test_mariadb_type_normalization(raw, expected):
+    assert normalize_mariadb_type(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, None),
+        ("NULL", None),  # SQL-NULL kommt bei MariaDB als Text
+        ("'NULL'", "NULL"),  # der Text 'NULL'
+        ("''", ""),
+        ("'it''s'", "it's"),
+        ("5", "5"),
+        ("current_timestamp()", "current_timestamp()"),
+    ],
+)
+def test_mariadb_default_normalization(raw, expected):
+    assert normalize_mariadb_default(raw) == expected
+
+
+def test_build_database_detects_mariadb():
+    columns = [
+        {"table_name": "t", "column_name": "id", "column_type": "int(11)", "is_nullable": "NO",
+         "column_default": "NULL", "comment": "", "extra": "auto_increment"},
+        {"table_name": "t", "column_name": "name", "column_type": "varchar(10)", "is_nullable": "NO",
+         "column_default": "'x'", "comment": "", "extra": ""},
+    ]
+    tables = [{"table_name": "t", "comment": ""}]
+    args = dict(tables=tables, columns=columns, indexes=[], foreign_keys=[])
+
+    maria = build_database("d", server_version="13.0.2-MariaDB", **args).schemas[0].tables[0]
+    assert [(c.data_type, c.default) for c in maria.columns] == [("int", None), ("varchar(10)", "x")]
+
+    # MySQL-Werte bleiben unverändert
+    mysql = build_database("d", server_version="8.4.11", **args).schemas[0].tables[0]
+    assert [(c.data_type, c.default) for c in mysql.columns] == [("int(11)", "NULL"), ("varchar(10)", "'x'")]

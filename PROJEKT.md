@@ -233,10 +233,13 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Umgebung: `.venv` (Python 3.11), Projekt editierbar installiert (`pip install -e .`)
 - Tests: `.venv\Scripts\python -m pytest -q` (Qt läuft dabei ohne Fenster)
 - Start: `.venv\Scripts\python -m erd_editor.main` (ohne Argumente öffnet „Datenbank einlesen“)
-- Testschema `erd_test_shop` ist eingespielt in MySQL (mit `erd_test_stammdaten`),
-  PostgreSQL und SQL Server (`tests/schema/*.sql`)
+- Testschema `erd_test_shop` ist eingespielt in MySQL 8.4 (Port 3306) und MariaDB 13 (Port 3307),
+  jeweils mit `erd_test_stammdaten`, sowie in PostgreSQL und SQL Server (`tests/schema/*.sql`)
 - Live-Tests holen Passwörter aus dem keyring, Dienst `erd-editor-test`:
-  Konten `root` (MySQL) und `postgres` (PostgreSQL); SQL Server per Windows-Anmeldung
+  Konten `root` (MySQL), `root@mariadb` (MariaDB) und `postgres` (PostgreSQL);
+  SQL Server per Windows-Anmeldung
+- MariaDB läuft über den MySQL-Adapter; er gleicht die Abweichungen an MySQL 8 an
+  (Anzeigebreite `int(11)` → `int`, gequotete Defaults `'abc'`/`NULL` → `abc`/None)
 - Die Anwendung selbst speichert Passwörter unter dem Dienst `erd-editor`
 - Tests, die ein echtes Menü oder einen Dialog öffnen würden, nicht mit `exec()` schreiben,
   sondern das Menü bauen und Aktionen direkt auslösen (sonst hängt der Testlauf)

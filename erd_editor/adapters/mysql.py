@@ -7,10 +7,17 @@ Aufbau:
 
 Alle Abfragen vergeben eigene Spaltenaliase in Kleinbuchstaben, weil MySQL 8
 die Spaltennamen von `information_schema` sonst teils groß zurückgibt.
+
+MariaDB wird über denselben Adapter gelesen. Zwei Abweichungen werden an
+MySQL 8 angeglichen (`mariadb=True`):
+- Ganzzahltypen tragen eine Anzeigebreite (`int(11)`), MySQL 8 nicht (`int`).
+- `COLUMN_DEFAULT` liefert Literale gequotet (`'abc'`, `NULL` als Text),
+  MySQL den nackten Wert bzw. SQL-NULL.
 """
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -114,6 +121,32 @@ def _text(value: Any) -> str | None:
     return _decode(value) or None
 
 
+_INT_DISPLAY_WIDTH = re.compile(r"^(tinyint|smallint|mediumint|int|bigint)\(\d+\)", re.IGNORECASE)
+
+
+def is_mariadb(server_version: str | None) -> bool:
+    return "mariadb" in (server_version or "").lower()
+
+
+def normalize_mariadb_type(column_type: str) -> str:
+    """Anzeigebreite von Ganzzahltypen entfernen, wie MySQL 8 sie ausgibt.
+
+    `tinyint(1)` (BOOLEAN) und `ZEROFILL`-Spalten behält auch MySQL 8 bei.
+    """
+    if "zerofill" in column_type.lower() or column_type.lower().startswith("tinyint(1)"):
+        return column_type
+    return _INT_DISPLAY_WIDTH.sub(lambda m: m.group(1), column_type)
+
+
+def normalize_mariadb_default(value: str | None) -> str | None:
+    """MariaDB-Default (gequotetes Literal, `NULL` als Text) wie bei MySQL 8."""
+    if value is None or value == "NULL":
+        return None
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    return value
+
+
 def _index_kind(index_name: str, non_unique: Any, index_type: str | None) -> IndexKind:
     if index_name == "PRIMARY":
         return IndexKind.PRIMARY
@@ -136,6 +169,7 @@ def build_database(
     collation: str | None = None,
     server_version: str | None = None,
     connection_profile: str | None = None,
+    mariadb: bool | None = None,
 ) -> Database:
     """Neutrales Modell aus den Ergebniszeilen der `SQL_*`-Abfragen bauen.
 
@@ -143,7 +177,11 @@ def build_database(
     Funktionsindexe (MySQL 8, ohne Spaltennamen) werden ohne die
     Ausdrucksteile übernommen; besteht ein Index nur aus Ausdrücken,
     entfällt er.
+
+    `mariadb=None` erkennt MariaDB an `server_version`.
     """
+    if mariadb is None:
+        mariadb = is_mariadb(server_version)
     by_name: dict[str, Table] = {}
     for row in tables:
         table_name = _text(row["table_name"])
@@ -154,13 +192,18 @@ def build_database(
         if table is None:  # z. B. Spalten einer View
             continue
         extra = (_text(row["extra"]) or "").lower()
+        data_type = _text(row["column_type"])
+        # leerer String ist ein echter Default (DEFAULT ''), daher nicht _text()
+        default = _decode(row["column_default"])
+        if mariadb:
+            data_type = normalize_mariadb_type(data_type)
+            default = normalize_mariadb_default(default)
         table.columns.append(
             Column(
                 name=_text(row["column_name"]),
-                data_type=_text(row["column_type"]),
+                data_type=data_type,
                 nullable=_text(row["is_nullable"]) == "YES",
-                # leerer String ist ein echter Default (DEFAULT ''), daher nicht _text()
-                default=_decode(row["column_default"]),
+                default=default,
                 comment=_text(row["comment"]),
                 auto_increment="auto_increment" in extra,
             )
