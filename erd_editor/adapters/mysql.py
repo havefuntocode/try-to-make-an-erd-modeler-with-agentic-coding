@@ -33,6 +33,7 @@ from erd_editor.model import (
     IndexKind,
     Schema,
     Table,
+    TableKind,
     TableRef,
 )
 
@@ -55,10 +56,28 @@ SQL_DATABASE_INFO = """
 
 SQL_TABLES = """
     SELECT TABLE_NAME    AS table_name,
-           TABLE_COMMENT AS comment
+           TABLE_COMMENT AS comment,
+           TABLE_TYPE    AS table_type
     FROM information_schema.TABLES
-    WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = 'BASE TABLE'
+    WHERE TABLE_SCHEMA = %s AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
     ORDER BY TABLE_NAME
+"""
+
+SQL_VIEWS = """
+    SELECT TABLE_NAME      AS view_name,
+           VIEW_DEFINITION AS definition
+    FROM information_schema.VIEWS
+    WHERE TABLE_SCHEMA = %s
+"""
+
+# MySQL 8.0.13+; MariaDB kennt die Tabelle nicht (dann aus dem SQL-Text)
+SQL_VIEW_USAGE = """
+    SELECT VIEW_NAME    AS view_name,
+           TABLE_SCHEMA AS referenced_schema,
+           TABLE_NAME   AS referenced_table
+    FROM information_schema.VIEW_TABLE_USAGE
+    WHERE VIEW_SCHEMA = %s
+    ORDER BY VIEW_NAME, TABLE_SCHEMA, TABLE_NAME
 """
 
 SQL_COLUMNS = """
@@ -147,6 +166,31 @@ def normalize_mariadb_default(value: str | None) -> str | None:
     return value
 
 
+# `db`.`tabelle` direkt hinter FROM/JOIN (ggf. nach öffnenden Klammern)
+_FROM_OBJECT = re.compile(r"\b(?:from|join)\s*[(\s]*`((?:[^`]|``)+)`\.`((?:[^`]|``)+)`", re.IGNORECASE)
+
+
+def view_usage_from_definition(definition: str) -> list[tuple[str, str]]:
+    """(Datenbank, Tabelle) aller Objekte hinter FROM/JOIN im View-Text.
+
+    MySQL und MariaDB speichern View-Definitionen mit voll qualifizierten
+    Objektnamen (`` `db`.`tabelle` ``). Ersatz für `VIEW_TABLE_USAGE`, das
+    MariaDB nicht kennt.
+    """
+    found: list[tuple[str, str]] = []
+    for match in _FROM_OBJECT.finditer(definition):
+        pair = (match.group(1).replace("``", "`"), match.group(2).replace("``", "`"))
+        if pair not in found:
+            found.append(pair)
+    return found
+
+
+def strip_own_database(definition: str, database: str) -> str:
+    """Eigenen Datenbanknamen aus dem View-Text entfernen (portabel für den SQL-Export)."""
+    quoted = "`" + database.replace("`", "``") + "`."
+    return definition.replace(quoted, "")
+
+
 def _index_kind(index_name: str, non_unique: Any, index_type: str | None) -> IndexKind:
     if index_name == "PRIMARY":
         return IndexKind.PRIMARY
@@ -165,6 +209,8 @@ def build_database(
     columns: Iterable[Row],
     indexes: Iterable[Row],
     foreign_keys: Iterable[Row],
+    views: Iterable[Row] = (),
+    view_usage: Iterable[Row] | None = None,
     charset: str | None = None,
     collation: str | None = None,
     server_version: str | None = None,
@@ -185,7 +231,28 @@ def build_database(
     by_name: dict[str, Table] = {}
     for row in tables:
         table_name = _text(row["table_name"])
-        by_name[table_name] = Table(table_name, comment=_text(row["comment"]))
+        if (_text(row.get("table_type")) or "BASE TABLE") == "VIEW":
+            # Views haben keinen eigenen Kommentar; MySQL meldet dort „VIEW“
+            by_name[table_name] = Table(table_name, kind=TableKind.VIEW)
+        else:
+            by_name[table_name] = Table(table_name, comment=_text(row["comment"]))
+
+    for row in views:
+        view = by_name.get(_text(row["view_name"]))
+        if view is not None and view.is_view:
+            text = _decode(row["definition"]) or ""
+            if view_usage is None:  # MariaDB: Abhängigkeiten aus dem Text
+                for db_name, obj in view_usage_from_definition(text):
+                    ref = TableRef(db_name, None, obj)
+                    if ref not in view.view_dependencies:
+                        view.view_dependencies.append(ref)
+            view.definition = strip_own_database(text, name) or None
+    for row in view_usage or ():
+        view = by_name.get(_text(row["view_name"]))
+        if view is not None and view.is_view:
+            ref = TableRef(_text(row["referenced_schema"]), None, _text(row["referenced_table"]))
+            if ref not in view.view_dependencies:
+                view.view_dependencies.append(ref)
 
     for row in columns:
         table = by_name.get(_text(row["table_name"]))
@@ -301,6 +368,15 @@ class MySqlAdapter(SchemaAdapter):
         names = (_text(r["name"]) for r in self._query(SQL_DATABASES))
         return [n for n in names if n.lower() not in SYSTEM_DATABASES]
 
+    def _view_usage(self, name: str) -> list[Row] | None:
+        """`VIEW_TABLE_USAGE` – None, wenn der Server sie nicht kennt (MariaDB, MySQL < 8.0.13)."""
+        import pymysql
+
+        try:
+            return self._query(SQL_VIEW_USAGE, name)
+        except pymysql.MySQLError:
+            return None
+
     def read_database(self, name: str) -> Database:
         info = self._query(SQL_DATABASE_INFO, name)
         if not info:
@@ -311,6 +387,8 @@ class MySqlAdapter(SchemaAdapter):
             columns=self._query(SQL_COLUMNS, name),
             indexes=self._query(SQL_INDEXES, name),
             foreign_keys=self._query(SQL_FOREIGN_KEYS, name),
+            views=self._query(SQL_VIEWS, name),
+            view_usage=self._view_usage(name),
             charset=_text(info[0]["charset"]),
             collation=_text(info[0]["collation"]),
             server_version=self.server_version(),

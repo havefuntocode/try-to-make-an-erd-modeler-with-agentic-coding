@@ -153,6 +153,8 @@ def replace_table(
                 fk.referenced_columns = mapped
             kept.append(fk)
         other.foreign_keys = kept
+        # Views, die die Tabelle benutzen (der SQL-Text bleibt unverändert)
+        other.view_dependencies = [new_ref if dep == ref else dep for dep in other.view_dependencies]
     return new
 
 
@@ -165,6 +167,7 @@ def delete_table(diagram: Diagram, ref: TableRef) -> Diagram:
     schema.tables = [t for t in schema.tables if t.name != ref.table]
     for _, other in new.tables():
         other.foreign_keys = [fk for fk in other.foreign_keys if fk.referenced_table != ref]
+        other.view_dependencies = [dep for dep in other.view_dependencies if dep != ref]
     return new
 
 
@@ -233,6 +236,8 @@ def plan_relationship(
     child_table, parent_table = diagram.find_table(child), diagram.find_table(parent)
     if child_table is None or parent_table is None:
         raise EditError("Tabelle nicht gefunden")
+    if child_table.is_view or parent_table.is_view:
+        raise EditError("Views haben keine Fremdschlüssel – Beziehungen nur zwischen Tabellen")
     pk = parent_table.primary_key_columns
     if not pk:
         raise EditError(f"Tabelle {parent.table!r} hat keinen Primärschlüssel – darauf kann kein Fremdschlüssel zeigen")

@@ -112,3 +112,17 @@ CREATE TABLE mitarbeiter (
     PRIMARY KEY (id),
     CONSTRAINT fk_vorgesetzter FOREIGN KEY (vorgesetzter_id) REFERENCES mitarbeiter (id)
 ) ENGINE = InnoDB;
+
+-- Views: über die Datenbankgrenze, mit Aggregat und eine View auf Views
+CREATE VIEW v_kunde_land AS
+    SELECT k.id, k.name, l.name AS land
+    FROM kunde k LEFT JOIN erd_test_stammdaten.land l ON l.code = k.land_code;
+
+CREATE VIEW v_bestellsumme AS
+    SELECT b.id AS bestellung_id, b.kunde_id, COUNT(p.pos) AS positionen
+    FROM bestellung b LEFT JOIN bestellposition p ON p.bestellung_id = b.id
+    GROUP BY b.id, b.kunde_id;
+
+CREATE VIEW v_kunde_bestellungen AS
+    SELECT v.id, v.name, s.positionen
+    FROM v_kunde_land v JOIN v_bestellsumme s ON s.kunde_id = v.id;

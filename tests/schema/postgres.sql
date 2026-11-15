@@ -125,3 +125,18 @@ CREATE TABLE shop.protokoll (
 ) PARTITION BY RANGE (zeit);
 CREATE TABLE shop.protokoll_2026 PARTITION OF shop.protokoll
     FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+
+-- Views: über die Schemagrenze, mit Aggregat und eine View auf Views
+CREATE VIEW shop.v_kunde_land AS
+    SELECT k.id, k.name, l.name AS land
+    FROM shop.kunde k LEFT JOIN stammdaten.land l ON l.code = k.land_code;
+COMMENT ON VIEW shop.v_kunde_land IS 'Kunden mit Land';
+
+CREATE VIEW shop.v_bestellsumme AS
+    SELECT b.id AS bestellung_id, b.kunde_id, COUNT(p.pos) AS positionen
+    FROM shop.bestellung b LEFT JOIN shop.bestellposition p ON p.bestellung_id = b.id
+    GROUP BY b.id, b.kunde_id;
+
+CREATE VIEW shop.v_kunde_bestellungen AS
+    SELECT v.id, v.name, s.positionen
+    FROM shop.v_kunde_land v JOIN shop.v_bestellsumme s ON s.kunde_id = v.id;

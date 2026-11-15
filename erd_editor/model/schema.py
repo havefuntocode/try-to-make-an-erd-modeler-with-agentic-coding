@@ -33,6 +33,13 @@ class IndexKind(str, Enum):
     OTHER = "OTHER"
 
 
+class TableKind(str, Enum):
+    """Art eines Objekts in der Tabellenliste eines Schemas."""
+
+    TABLE = "TABLE"
+    VIEW = "VIEW"
+
+
 @dataclass(frozen=True, order=True)
 class TableRef:
     """Eindeutiger, stabiler Verweis auf eine Tabelle im Diagramm.
@@ -107,13 +114,26 @@ class ForeignKey:
 
 @dataclass
 class Table:
-    """Tabelle mit Spalten, Indexen und ausgehenden Fremdschlüsseln."""
+    """Tabelle mit Spalten, Indexen und ausgehenden Fremdschlüsseln – oder eine View.
+
+    Views stehen in derselben Liste wie Tabellen (gleiche Verweise, gleiches
+    Layout), haben `kind=VIEW`, ihren SQL-Text (`definition`, nur der
+    SELECT-Teil, ohne `CREATE VIEW … AS`) und die Tabellen/Views, die sie
+    benutzen (`view_dependencies`). Fremdschlüssel haben sie nicht.
+    """
 
     name: str
     columns: list[Column] = field(default_factory=list)
     indexes: list[Index] = field(default_factory=list)
     foreign_keys: list[ForeignKey] = field(default_factory=list)
     comment: str | None = None
+    kind: TableKind = TableKind.TABLE
+    definition: str | None = None
+    view_dependencies: list[TableRef] = field(default_factory=list)
+
+    @property
+    def is_view(self) -> bool:
+        return self.kind is TableKind.VIEW
 
     def column(self, name: str) -> Column | None:
         """Spalte über ihren Namen suchen."""
@@ -246,4 +266,9 @@ class Diagram:
                             f"{ref}: FK {fk.name!r} verweist auf unbekannte Spalte "
                             f"{fk.referenced_table}.{col}"
                         )
+            if table.is_view and table.foreign_keys:
+                problems.append(f"{ref}: View mit Fremdschlüsseln")
+            for dep in table.view_dependencies:
+                if self.find_table(dep) is None:
+                    problems.append(f"{ref}: View benutzt fehlendes Objekt {dep}")
         return problems

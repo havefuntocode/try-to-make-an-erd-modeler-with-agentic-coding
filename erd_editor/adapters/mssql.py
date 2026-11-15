@@ -17,6 +17,7 @@ Besonderheiten von SQL Server:
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -32,6 +33,7 @@ from erd_editor.model import (
     IndexKind,
     Schema,
     Table,
+    TableKind,
     TableRef,
 )
 
@@ -68,16 +70,37 @@ SQL_SCHEMAS = """
     ORDER BY name
 """
 
+# U = Tabelle, V = View
 SQL_TABLES = """
     SELECT s.name AS schema_name,
            t.name AS table_name,
-           CAST(ep.value AS nvarchar(max)) AS comment
-    FROM sys.tables t
+           CAST(ep.value AS nvarchar(max)) AS comment,
+           RTRIM(t.type) AS kind,
+           m.definition AS definition
+    FROM sys.objects t
     JOIN sys.schemas s ON s.schema_id = t.schema_id
+    LEFT JOIN sys.sql_modules m ON m.object_id = t.object_id
     LEFT JOIN sys.extended_properties ep
            ON ep.class = 1 AND ep.major_id = t.object_id AND ep.minor_id = 0 AND ep.name = 'MS_Description'
-    WHERE t.is_ms_shipped = 0
+    WHERE t.is_ms_shipped = 0 AND t.type IN ('U', 'V')
     ORDER BY s.name, t.name
+"""
+
+# Tabellen/Views derselben Datenbank, die eine View benutzt
+SQL_VIEW_USAGE = """
+    SELECT DISTINCT s.name AS schema_name,
+           v.name AS view_name,
+           rs.name AS referenced_schema,
+           r.name AS referenced_table
+    FROM sys.sql_expression_dependencies d
+    JOIN sys.views v    ON v.object_id = d.referencing_id
+    JOIN sys.schemas s  ON s.schema_id = v.schema_id
+    JOIN sys.objects r  ON r.object_id = d.referenced_id
+    JOIN sys.schemas rs ON rs.schema_id = r.schema_id
+    WHERE d.referenced_database_name IS NULL
+      AND r.type IN ('U', 'V')
+      AND v.is_ms_shipped = 0
+    ORDER BY 1, 2, 3, 4
 """
 
 SQL_COLUMNS = """
@@ -94,7 +117,7 @@ SQL_COLUMNS = """
            dc.definition   AS column_default,
            CAST(ep.value AS nvarchar(max)) AS comment
     FROM sys.columns c
-    JOIN sys.tables t   ON t.object_id = c.object_id
+    JOIN sys.objects t  ON t.object_id = c.object_id AND t.type IN ('U', 'V')
     JOIN sys.schemas s  ON s.schema_id = t.schema_id
     JOIN sys.types ty   ON ty.user_type_id = c.user_type_id
     LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
@@ -203,6 +226,22 @@ def _index_kind(is_primary: Any, is_unique: Any, type_desc: Any) -> IndexKind:
     return IndexKind.UNIQUE if is_unique else IndexKind.INDEX
 
 
+# Kommentare/Leerraum, dann CREATE [OR ALTER] VIEW name [(spalten)] [WITH …] AS
+_VIEW_HEADER = re.compile(
+    r"^(?:\s+|--[^\n]*(?:\n|$)|/\*.*?\*/)*create\s+(?:or\s+alter\s+)?view\s+.+?\bas\b\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def view_body(module: str | None) -> str | None:
+    """SELECT-Teil aus dem Modultext `CREATE VIEW … AS SELECT …` (ohne Semikolon am Ende)."""
+    if not module:
+        return None
+    match = _VIEW_HEADER.match(module)
+    body = module[match.end():] if match else module
+    return body.strip().removesuffix(";").rstrip() or None
+
+
 def _strip_parens(definition: str | None) -> str | None:
     """SQL Server speichert Defaults geklammert: `((1))` → `1`, `('')` → `''`."""
     if definition is None:
@@ -233,6 +272,7 @@ def build_database(
     columns: Iterable[Row],
     indexes: Iterable[Row],
     foreign_keys: Iterable[Row],
+    view_usage: Iterable[Row] = (),
     collation: str | None = None,
     server_version: str | None = None,
     connection_profile: str | None = None,
@@ -243,7 +283,11 @@ def build_database(
     """
     by_schema: dict[str, dict[str, Table]] = {r["schema_name"]: {} for r in schemas}
     for row in tables:
-        by_schema.setdefault(row["schema_name"], {})[row["table_name"]] = Table(row["table_name"], comment=_text(row["comment"]))
+        t = Table(row["table_name"], comment=_text(row["comment"]))
+        if _text(row.get("kind")) == "V":
+            t.kind = TableKind.VIEW
+            t.definition = view_body(_text(row.get("definition")))
+        by_schema.setdefault(row["schema_name"], {})[row["table_name"]] = t
 
     def table(row: Row) -> Table | None:
         return by_schema.get(row["schema_name"], {}).get(row["table_name"])
@@ -291,6 +335,13 @@ def build_database(
                 on_delete=_rule(first["delete_rule"]),
             )
         )
+
+    for row in view_usage:
+        view = table({"schema_name": row["schema_name"], "table_name": row["view_name"]})
+        if view is not None and view.is_view:
+            ref = TableRef(name, row["referenced_schema"], row["referenced_table"])
+            if ref not in view.view_dependencies:
+                view.view_dependencies.append(ref)
 
     return Database(
         name=name,
@@ -393,6 +444,7 @@ class MssqlAdapter(SchemaAdapter):
                 columns=self._query(conn, SQL_COLUMNS),
                 indexes=self._query(conn, SQL_INDEXES),
                 foreign_keys=self._query(conn, SQL_FOREIGN_KEYS),
+                view_usage=self._query(conn, SQL_VIEW_USAGE),
                 collation=_text(info["collation"]),
                 server_version=product_version(_text(version)),
                 connection_profile=self.profile.name,

@@ -37,6 +37,7 @@ from erd_editor.model import (
     Schema,
     Subdiagram,
     Table,
+    TableKind,
     TableRef,
 )
 
@@ -187,6 +188,15 @@ def _database_from_dict(d: dict[str, Any]) -> Database:
 
 
 def _table_to_dict(t: Table) -> dict[str, Any]:
+    data = _table_body_to_dict(t)
+    if t.is_view:  # nur bei Views, damit Dateien ohne Views unverändert bleiben
+        data["kind"] = t.kind.value
+        data["definition"] = t.definition
+        data["view_dependencies"] = [_ref_to_dict(r) for r in t.view_dependencies]
+    return data
+
+
+def _table_body_to_dict(t: Table) -> dict[str, Any]:
     return {
         "name": t.name,
         "comment": t.comment,
@@ -220,6 +230,9 @@ def _table_from_dict(d: dict[str, Any]) -> Table:
     return Table(
         name=d["name"],
         comment=d.get("comment"),
+        kind=TableKind(d.get("kind", TableKind.TABLE.value)),
+        definition=d.get("definition"),
+        view_dependencies=[_ref_from_dict(r) for r in d.get("view_dependencies", [])],
         columns=[
             Column(
                 c["name"],

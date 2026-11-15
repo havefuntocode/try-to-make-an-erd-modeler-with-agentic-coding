@@ -31,6 +31,7 @@ from erd_editor.model import (
     IndexKind,
     Schema,
     Table,
+    TableKind,
     TableRef,
 )
 
@@ -67,14 +68,16 @@ SQL_SCHEMAS = f"""
     ORDER BY n.nspname
 """
 
-# r = Tabelle, p = partitionierte Tabelle; Partitionen selbst werden ausgelassen
+# r = Tabelle, p = partitionierte Tabelle, v = View; Partitionen selbst werden ausgelassen
 SQL_TABLES = f"""
     SELECT n.nspname                        AS schema_name,
            c.relname                        AS table_name,
-           obj_description(c.oid, 'pg_class') AS comment
+           obj_description(c.oid, 'pg_class') AS comment,
+           c.relkind                        AS kind,
+           CASE WHEN c.relkind = 'v' THEN pg_get_viewdef(c.oid, true) END AS definition
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE c.relkind IN ('r', 'p')
+    WHERE c.relkind IN ('r', 'p', 'v')
       AND NOT c.relispartition
       AND {SYSTEM_SCHEMA_FILTER}
     ORDER BY n.nspname, c.relname
@@ -94,7 +97,7 @@ SQL_COLUMNS = f"""
     JOIN pg_class c      ON c.oid = a.attrelid
     JOIN pg_namespace n  ON n.oid = c.relnamespace
     LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-    WHERE c.relkind IN ('r', 'p')
+    WHERE c.relkind IN ('r', 'p', 'v')
       AND NOT c.relispartition
       AND a.attnum > 0
       AND NOT a.attisdropped
@@ -151,6 +154,27 @@ SQL_FOREIGN_KEYS = f"""
     ORDER BY n.nspname, t.relname, con.conname, k.ord
 """
 
+# Tabellen/Views, die eine View benutzt: über die Rewrite-Regel der View
+SQL_VIEW_USAGE = f"""
+    SELECT DISTINCT n.nspname  AS schema_name,
+           v.relname           AS view_name,
+           rn.nspname          AS referenced_schema,
+           t.relname           AS referenced_table
+    FROM pg_rewrite r
+    JOIN pg_class v      ON v.oid = r.ev_class
+    JOIN pg_namespace n  ON n.oid = v.relnamespace
+    JOIN pg_depend d     ON d.objid = r.oid
+                        AND d.classid = 'pg_rewrite'::regclass
+                        AND d.refclassid = 'pg_class'::regclass
+    JOIN pg_class t      ON t.oid = d.refobjid
+    JOIN pg_namespace rn ON rn.oid = t.relnamespace
+    WHERE v.relkind = 'v'
+      AND t.oid <> v.oid
+      AND t.relkind IN ('r', 'p', 'v')
+      AND {SYSTEM_SCHEMA_FILTER}
+    ORDER BY 1, 2, 3, 4
+"""
+
 # Kürzel aus pg_constraint → SQL-Schreibweise
 FK_RULES = {"a": "NO ACTION", "r": "RESTRICT", "c": "CASCADE", "n": "SET NULL", "d": "SET DEFAULT"}
 
@@ -161,6 +185,12 @@ def _text(value: Any) -> str | None:
         return None
     value = str(value)
     return value or None
+
+
+def clean_view_definition(text: Any) -> str | None:
+    """`pg_get_viewdef` liefert ` SELECT …;` – ohne Rand und Semikolon."""
+    value = (_text(text) or "").strip()
+    return value.removesuffix(";").rstrip() or None
 
 
 def _index_kind(is_primary: bool, is_unique: bool) -> IndexKind:
@@ -182,6 +212,7 @@ def build_database(
     columns: Iterable[Row],
     indexes: Iterable[Row],
     foreign_keys: Iterable[Row],
+    view_usage: Iterable[Row] = (),
     charset: str | None = None,
     collation: str | None = None,
     server_version: str | None = None,
@@ -196,7 +227,11 @@ def build_database(
     by_schema: dict[str, dict[str, Table]] = {_text(r["schema_name"]): {} for r in schemas}
     for row in tables:
         schema = _text(row["schema_name"])
-        by_schema.setdefault(schema, {})[row["table_name"]] = Table(row["table_name"], comment=_text(row["comment"]))
+        t = Table(row["table_name"], comment=_text(row["comment"]))
+        if _text(row.get("kind")) == "v":
+            t.kind = TableKind.VIEW
+            t.definition = clean_view_definition(row.get("definition"))
+        by_schema.setdefault(schema, {})[row["table_name"]] = t
 
     def table(row: Row) -> Table | None:
         return by_schema.get(_text(row["schema_name"]), {}).get(row["table_name"])
@@ -247,6 +282,13 @@ def build_database(
                 on_delete=FK_RULES.get(_text(first["delete_rule"]) or ""),
             )
         )
+
+    for row in view_usage:
+        view = table({"schema_name": row["schema_name"], "table_name": row["view_name"]})
+        if view is not None and view.is_view:
+            ref = TableRef(name, _text(row["referenced_schema"]), row["referenced_table"])
+            if ref not in view.view_dependencies:
+                view.view_dependencies.append(ref)
 
     return Database(
         name=name,
@@ -326,6 +368,7 @@ class PostgresAdapter(SchemaAdapter):
                 columns=self._query(conn, SQL_COLUMNS),
                 indexes=self._query(conn, SQL_INDEXES),
                 foreign_keys=self._query(conn, SQL_FOREIGN_KEYS),
+                view_usage=self._query(conn, SQL_VIEW_USAGE),
                 charset=_text(info["charset"]),
                 collation=_text(info["collation"]),
                 server_version=self.server_version(),

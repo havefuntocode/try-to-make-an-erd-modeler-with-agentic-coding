@@ -94,6 +94,7 @@ def test_same_tables_and_columns(live, expected):
         return {
             ref.key: [(c.name, c.data_type, c.nullable) for c in table.columns]
             for ref, table in diagram.tables()
+            if not table.is_view
         }
 
     assert shape(live) == shape(expected)
@@ -101,7 +102,7 @@ def test_same_tables_and_columns(live, expected):
 
 def test_same_primary_keys(live, expected):
     def pks(diagram):
-        return {ref.key: table.primary_key_columns for ref, table in diagram.tables()}
+        return {ref.key: table.primary_key_columns for ref, table in diagram.tables() if not table.is_view}
 
     assert pks(live) == pks(expected)
 
@@ -134,3 +135,22 @@ def test_comments_and_details(live):
     assert kunde.column("name").default == ""
     assert kunde.column("id").auto_increment
     assert any(i.name == "ft_name" and i.kind.value == "FULLTEXT" for i in kunde.indexes)
+
+
+def test_views(live):
+    """Views mit Spalten, portablem SQL-Text und Abhängigkeiten (MySQL: VIEW_TABLE_USAGE, MariaDB: SQL-Text)."""
+    shop = live.database(SHOP).schemas[0]
+    views = {t.name: t for t in shop.tables if t.is_view}
+    assert set(views) == {"v_kunde_land", "v_bestellsumme", "v_kunde_bestellungen"}
+
+    def deps(name):
+        return {(r.database, r.table) for r in views[name].view_dependencies}
+
+    assert deps("v_kunde_land") == {(SHOP, "kunde"), (MASTER, "land")}
+    assert deps("v_bestellsumme") == {(SHOP, "bestellung"), (SHOP, "bestellposition")}
+    assert deps("v_kunde_bestellungen") == {(SHOP, "v_kunde_land"), (SHOP, "v_bestellsumme")}
+    assert [c.name for c in views["v_kunde_land"].columns] == ["id", "name", "land"]
+    text = views["v_kunde_land"].definition
+    assert text.lower().startswith("select")
+    assert f"`{SHOP}`." not in text and f"`{MASTER}`." in text  # eigene DB entfernt, fremde bleibt
+    assert not views["v_kunde_land"].foreign_keys and live.validate() == []

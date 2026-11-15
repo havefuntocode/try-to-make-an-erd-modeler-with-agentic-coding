@@ -13,6 +13,7 @@ from erd_editor.model.schema import (
     IndexKind,
     Schema,
     Table,
+    TableKind,
     TableRef,
 )
 
@@ -31,6 +32,7 @@ __all__ = [
     "Schema",
     "Subdiagram",
     "Table",
+    "TableKind",
     "TableRef",
     "filter_diagram",
 ]

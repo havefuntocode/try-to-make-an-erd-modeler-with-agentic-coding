@@ -63,7 +63,8 @@ def expected(schema_builder) -> Diagram:
 
 
 def without_partitioned(diagram):
-    return {ref: t for ref, t in diagram.tables() if ref.table != "protokoll"}
+    """Nur die Tabellen des gemeinsamen Testschemas (ohne Partitionstabelle und Views)."""
+    return {ref: t for ref, t in diagram.tables() if ref.table != "protokoll" and not t.is_view}
 
 
 def test_consistent(live):
@@ -120,3 +121,19 @@ def test_unknown_database(live):
     profile = ConnectionProfile("pg-test", Dialect.POSTGRESQL, "localhost", None, USER)
     with PostgresAdapter(profile, PASSWORD) as adapter, pytest.raises(AdapterError):
         adapter.read_database("gibt_es_nicht")
+
+
+def test_views(live):
+    views = {ref.table: t for ref, t in live.tables() if t.is_view}
+    assert set(views) == {"v_kunde_land", "v_bestellsumme", "v_kunde_bestellungen"}
+
+    def deps(name):
+        return {(r.schema, r.table) for r in views[name].view_dependencies}
+
+    assert deps("v_kunde_land") == {("shop", "kunde"), ("stammdaten", "land")}
+    assert deps("v_bestellsumme") == {("shop", "bestellung"), ("shop", "bestellposition")}
+    assert deps("v_kunde_bestellungen") == {("shop", "v_kunde_land"), ("shop", "v_bestellsumme")}
+    assert views["v_kunde_land"].comment == "Kunden mit Land"
+    assert [c.name for c in views["v_bestellsumme"].columns] == ["bestellung_id", "kunde_id", "positionen"]
+    text = views["v_kunde_land"].definition
+    assert text.startswith("SELECT") and not text.endswith(";")

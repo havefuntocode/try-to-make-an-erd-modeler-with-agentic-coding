@@ -10,6 +10,7 @@ from erd_editor.adapters.mssql import (
     connection_string,
     format_type,
     product_version,
+    view_body,
 )
 from erd_editor.analysis import derive_relationships
 from erd_editor.model import ConnectionProfile, Diagram, Dialect, IndexKind, TableRef
@@ -156,13 +157,14 @@ class TestLive:
 
     def test_same_columns(self, live, expected):
         def shape(d, skip=()):
-            return {r.key: [(c.name, c.nullable) for c in t.columns if c.name not in skip] for r, t in d.tables()}
+            return {r.key: [(c.name, c.nullable) for c in t.columns if c.name not in skip]
+                    for r, t in d.tables() if not t.is_view}
 
         assert shape(live, skip=("preis", "angelegt")) == shape(expected)
 
     def test_same_primary_keys(self, live, expected):
         def pks(d):
-            return {r.key: t.primary_key_columns for r, t in d.tables()}
+            return {r.key: t.primary_key_columns for r, t in d.tables() if not t.is_view}
 
         assert pks(live) == pks(expected)
 
@@ -193,6 +195,32 @@ class TestLive:
         assert ft.columns == ("name",)
         db = live.database(DB)
         assert db.collation and db.server_version
+
+    def test_views(self, live):
+        views = {r.table: t for r, t in live.tables() if t.is_view}
+        assert set(views) == {"v_kunde_land", "v_bestellsumme", "v_kunde_bestellungen"}
+
+        def deps(name):
+            return {(r.schema, r.table) for r in views[name].view_dependencies}
+
+        assert deps("v_kunde_land") == {("shop", "kunde"), ("stammdaten", "land")}
+        assert deps("v_kunde_bestellungen") == {("shop", "v_kunde_land"), ("shop", "v_bestellsumme")}
+        assert views["v_kunde_land"].comment == "Kunden mit Land"
+        # nur der SELECT-Teil, ohne vorangestellten Kommentar und CREATE VIEW
+        assert views["v_kunde_land"].definition.startswith("SELECT")
+        assert [c.name for c in views["v_bestellsumme"].columns] == ["bestellung_id", "kunde_id", "positionen"]
+
+
+@pytest.mark.parametrize(
+    ("module", "body"),
+    [
+        ("CREATE VIEW shop.v AS SELECT 1 AS a", "SELECT 1 AS a"),
+        ("-- Kommentar\n/* Block */\ncreate   view [shop].[v] (a, b) WITH SCHEMABINDING AS\n  SELECT 1, 2;", "SELECT 1, 2"),
+        ("CREATE OR ALTER VIEW dbo.v_last AS\nSELECT x FROM t", "SELECT x FROM t"),
+    ],
+)
+def test_view_body(module, body):
+    assert view_body(module) == body
 
 
 def test_product_version():
