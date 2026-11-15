@@ -26,6 +26,8 @@ from erd_editor.model import Column, ColumnMode, DisplayOptions, Index, IndexKin
 
 MAX_COMMENT_WIDTH = 280.0  # längere Tabellenkommentare werden gekürzt (…)
 MAX_TOOLTIP_COLUMNS = 25
+MAX_TOOLTIP_SQL = 600  # Zeichen des View-Texts im Tooltip
+VIEW_TAG = "VIEW"  # Kürzel rechts in der Kopfzeile einer View
 
 
 @dataclass
@@ -122,6 +124,15 @@ class EntityItem(QGraphicsObject):
     # ------------------------------------------------------------------ Geometrie
 
     @property
+    def header_font(self) -> QFont:
+        """Views: Name kursiv."""
+        if not self.table.is_view:
+            return self.style.header_font
+        font = QFont(self.style.header_font)
+        font.setItalic(True)
+        return font
+
+    @property
     def comment_font(self) -> QFont:
         font = QFont(self.style.index_font)
         font.setItalic(True)
@@ -195,7 +206,10 @@ class EntityItem(QGraphicsObject):
         else:
             height = columns_bottom + p / 2
 
-        width = max(width, s.min_width, 2 * p + fm_header.horizontalAdvance(self.table.name))
+        name_w = QFontMetricsF(self.header_font).horizontalAdvance(self.table.name)
+        if self.table.is_view:  # Platz für das Kürzel rechts in der Kopfzeile
+            name_w += s.gap * 2 + QFontMetricsF(s.index_font).horizontalAdvance(VIEW_TAG)
+        width = max(width, s.min_width, 2 * p + name_w)
 
         # Kommentar darf die Box bis MAX_COMMENT_WIDTH verbreitern, darüber wird gekürzt
         self._comment_text = ""
@@ -267,9 +281,13 @@ class EntityItem(QGraphicsObject):
             painter.drawLine(QPointF(0, self._index_top), QPointF(w, self._index_top))
 
         # Kopfzeile
-        painter.setFont(s.header_font)
+        painter.setFont(self.header_font)
         painter.setPen(s.header_text)
         painter.drawText(QRectF(p, 0, w - 2 * p, self._header_h), Qt.AlignmentFlag.AlignVCenter, self.table.name)
+        if self.table.is_view:
+            painter.setFont(s.index_font)
+            right = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            painter.drawText(QRectF(p, 0, w - 2 * p, self._header_h), right, VIEW_TAG)
 
         # Tabellenkommentar
         if self._comment_top is not None:
@@ -312,6 +330,8 @@ class EntityItem(QGraphicsObject):
         # Rahmen
         selected = self.isSelected()
         pen = QPen(s.selected_border if selected else s.border, s.selected_border_width if selected else s.border_width)
+        if self.table.is_view:  # Views gestrichelt – auch im Schwarz-Weiß-Druck erkennbar
+            pen.setStyle(Qt.PenStyle.DashLine)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPath(outline)
@@ -331,6 +351,8 @@ class EntityItem(QGraphicsObject):
         """Tooltip-Text (HTML) für eine Position in Item-Koordinaten."""
         y = pos.y()
         if y < self._header_h or (self._comment_top is not None and y < self._comment_top + self._row_h):
+            if self.table.is_view:
+                return view_tooltip(self.ref, self.table)
             return _with_comment(f"<b>{escape(self.ref.key)}</b>", self.table.comment)
         for row in self._columns:
             if row.top <= y < row.top + self._row_h:
@@ -366,6 +388,19 @@ def column_tooltip(c: Column) -> str:
     if c.auto_increment:
         parts.append("AUTO_INCREMENT")
     return _with_comment(" · ".join(parts), c.comment)
+
+
+def view_tooltip(ref: TableRef, table: Table) -> str:
+    """Kopfzeile einer View: Name, Kommentar, benutzte Objekte, gekürzter SQL-Text."""
+    text = _with_comment(f"<b>{escape(ref.key)}</b> (View)", table.comment)
+    if table.view_dependencies:
+        text += "<br>Benutzt: " + escape(", ".join(d.table for d in table.view_dependencies))
+    if table.definition:
+        sql = table.definition
+        if len(sql) > MAX_TOOLTIP_SQL:
+            sql = sql[:MAX_TOOLTIP_SQL].rstrip() + " …"
+        text += f"<pre>{escape(sql)}</pre>"
+    return text
 
 
 def _with_comment(text: str, comment: str | None) -> str:

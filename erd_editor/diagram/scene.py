@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneContextMenuEvent, QG
 
 from erd_editor.analysis import ZERO_OR_MANY, RelationshipKey, RelationshipOverride, apply_overrides, derive_relationships
 from erd_editor.diagram.container_item import ContainerItem
+from erd_editor.diagram.dependency_item import DependencyItem
 from erd_editor.diagram.entity_item import EntityItem
 from erd_editor.diagram.palette import colors_for
 from erd_editor.diagram.relation_item import RelationItem
@@ -50,6 +51,7 @@ class DiagramScene(QGraphicsScene):
         self.notation = notation or CrowsFootNotation()
         self.entities: dict[TableRef, EntityItem] = {}
         self.relations: list[RelationItem] = []
+        self.dependencies: list[DependencyItem] = []  # View → benutzte Objekte
         self.containers: dict[str, ContainerItem] = {}
         self.schema_items: dict[tuple[str, str], SchemaItem] = {}
         self.diagram: Diagram | None = None
@@ -78,6 +80,7 @@ class DiagramScene(QGraphicsScene):
         unter das Diagramm.
         """
         self.relations = []
+        self.dependencies = []
         self.entities = {}
         self.containers = {}
         self.schema_items = {}
@@ -162,6 +165,7 @@ class DiagramScene(QGraphicsScene):
         for item in self.relations:
             self.removeItem(item)
         self.relations = [self._new_relation(rel) for rel in self._derived_relationships()]
+        self._sync_dependencies()
         self._apply_entity_corners()
 
     def _new_relation(self, rel) -> RelationItem:
@@ -286,7 +290,52 @@ class DiagramScene(QGraphicsScene):
             for item in leftovers:
                 self.removeItem(item)
         self.relations = relations
+        self._sync_dependencies()
         self._apply_entity_corners()
+
+    def _sync_dependencies(self) -> None:
+        """Abhängigkeitslinien der Views abgleichen (vorhandene Linien bleiben, wo möglich).
+
+        Gezeichnet wird nur, was in der Szene steht – in Teildiagrammen
+        entfallen Linien zu nicht gezeigten Objekten.
+        """
+        wanted: list[tuple[TableRef, TableRef]] = []
+        for ref, item in self.entities.items():
+            for dep in item.table.view_dependencies if item.table.is_view else ():
+                if dep in self.entities and dep != ref and (ref, dep) not in wanted:
+                    wanted.append((ref, dep))
+        old = {d.key: d for d in self.dependencies}
+        result: list[DependencyItem] = []
+        for view_ref, target_ref in wanted:
+            item = old.pop((view_ref, target_ref), None)
+            view, target = self.entities[view_ref], self.entities[target_ref]
+            if item is None or item.view_item is not view or item.target_item is not target:
+                if item is not None:
+                    self.removeItem(item)
+                item = DependencyItem(view, target)
+                item.scale_factor = self.display_scale
+                self.addItem(item)
+            result.append(item)
+        for item in old.values():
+            self.removeItem(item)
+        self.dependencies = result
+
+    def _route_dependencies(self) -> None:
+        """Abhängigkeitslinien führen: Seitenmitte zu Seitenmitte, anderen Boxen ausweichen."""
+        if not self.dependencies:
+            return
+        f = self.display_scale
+        stub = 14.0 * f
+        all_rects = {id(item): item.mapRectToScene(item.rect) for item in self.entities.values()}
+        for dep in self.dependencies:
+            v_rect, t_rect = all_rects[id(dep.view_item)], all_rects[id(dep.target_item)]
+            view_side, target_side = choose_sides(v_rect, t_rect, 2 * stub)
+            start = QPointF(view_side.x_of(v_rect), v_rect.top() + min(v_rect.height() / 2, 40 * f))
+            end = QPointF(target_side.x_of(t_rect), t_rect.top() + min(t_rect.height() / 2, 40 * f))
+            skip = {id(dep.view_item), id(dep.target_item)}
+            obstacles = [r for key, r in all_rects.items() if key not in skip]
+            points = route_avoiding(start, view_side, end, target_side, stub, 0.0, obstacles, 14.0 * f)
+            dep.set_route(points, target_side)
 
     def _apply_entity_corners(self) -> None:
         """IDEF1X: abhängige Entitäten (Kind einer identifizierenden Beziehung) rund, sonst eckig."""
@@ -386,6 +435,7 @@ class DiagramScene(QGraphicsScene):
         options = self._layout_options()
         schema_options = replace(options, group_gap=self.SCHEMA_GAP * self.display_scale)
         edges = [(r.relationship.child, r.relationship.parent) for r in self.relations]
+        edges += [d.key for d in self.dependencies]  # Views in die Nähe ihrer Tabellen
         positions: dict[TableRef, Position] = {}
         y = start_y
         for refs in refs_by_db.values():
@@ -505,7 +555,7 @@ class DiagramScene(QGraphicsScene):
         positions = {ref: scaled(item.pos().x(), item.pos().y()) for ref, item in self.entities.items()}
         for item in self.entities.values():
             item.setScale(scale)
-        for rel in self.relations:
+        for rel in [*self.relations, *self.dependencies]:
             rel.scale_factor = scale
         for frame in self.frames():
             frame.set_scale(scale)
@@ -528,7 +578,7 @@ class DiagramScene(QGraphicsScene):
             self.display_scale = layout.scale
             for item in self.entities.values():
                 item.setScale(layout.scale)
-            for rel in self.relations:
+            for rel in [*self.relations, *self.dependencies]:
                 rel.scale_factor = layout.scale
             for frame in self.frames():
                 frame.set_scale(layout.scale)
@@ -650,7 +700,7 @@ class DiagramScene(QGraphicsScene):
         container = self.container_of(item)
         if container is not None:
             container.update_geometry()  # … und der Datenbank-Rahmen auch
-        if self.relations:
+        if self.relations or self.dependencies:
             self.update_relations()
         self.layout_changed.emit()
 
@@ -661,6 +711,7 @@ class DiagramScene(QGraphicsScene):
         Schritt 2: Eltern-Andockpunkte je Box und Seite verteilen.
         Schritt 3: Linien führen.
         """
+        self._route_dependencies()
         if not self.relations:
             return
         f = self.display_scale
@@ -732,5 +783,5 @@ class DiagramScene(QGraphicsScene):
             rel_item.set_route(points, child_side, parent_side)
 
     def _on_selection_changed(self) -> None:
-        for rel_item in self.relations:
+        for rel_item in [*self.relations, *self.dependencies]:
             rel_item.update()

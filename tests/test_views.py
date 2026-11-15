@@ -134,3 +134,62 @@ def test_postgres_view():
     assert v.is_view and v.comment == "Sicht"
     assert v.definition == "SELECT kunde.id\n   FROM shop.kunde"
     assert v.view_dependencies == [TableRef("erd", "shop", "kunde")]
+
+
+# ------------------------------------------------------------------ Darstellung
+
+
+@pytest.fixture
+def scene(qapp, diagram):
+    from erd_editor.diagram.scene import DiagramScene
+
+    s = DiagramScene()
+    s.load(diagram)
+    return s
+
+
+def test_scene_draws_dependencies(scene):
+    keys = [(v.table, t.table) for v, t in (d.key for d in scene.dependencies)]
+    assert keys == [("v_kunde", "kunde"), ("v_alles", "v_kunde"), ("v_alles", "bestellung")]
+    assert all(len(d.points) >= 2 for d in scene.dependencies)
+    # Pfeilspitze endet am Rand der benutzten Box
+    dep = scene.dependencies[0]
+    target = dep.target_item.mapRectToScene(dep.target_item.rect)
+    assert dep.points[-1].x() in (pytest.approx(target.left()), pytest.approx(target.right()))
+
+
+def test_view_box_is_marked(scene):
+    from erd_editor.diagram.entity_item import VIEW_TAG
+
+    view, table = scene.entities[shop("v_kunde")], scene.entities[shop("kunde")]
+    assert view.header_font.italic() and not table.header_font.italic()
+    tip = view.tooltip_at(view.rect.topLeft())  # Kopfzeile
+    assert "(View)" in tip and "SELECT 1" in tip and "kunde" in tip
+    assert VIEW_TAG == "VIEW"
+
+
+def test_dependencies_follow_moves(scene):
+    dep = scene.dependencies[0]
+    before = list(dep.points)
+    scene.entities[shop("kunde")].moveBy(0, 300)
+    assert dep.points != before
+
+
+def test_subdiagram_hides_lines_to_missing_objects(qapp, diagram):
+    from erd_editor.diagram.scene import DiagramScene
+    from erd_editor.model import filter_diagram
+
+    s = DiagramScene()
+    s.load(filter_diagram(diagram, [shop("v_alles"), shop("bestellung")]))
+    assert [(v.table, t.table) for v, t in (d.key for d in s.dependencies)] == [("v_alles", "bestellung")]
+
+
+def test_update_keeps_dependency_items(scene, diagram):
+    import copy
+
+    first = list(scene.dependencies)
+    new = copy.deepcopy(diagram)
+    new.find_table(shop("v_alles")).view_dependencies.remove(shop("bestellung"))
+    assert scene.update_diagram(new)
+    assert scene.dependencies == first[:2]  # dieselben Objekte, nur eine Linie weniger
+    assert len([i for i in scene.items() if i.__class__.__name__ == "DependencyItem"]) == 2
