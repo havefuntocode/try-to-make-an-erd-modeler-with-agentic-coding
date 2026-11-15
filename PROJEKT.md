@@ -302,4 +302,6 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 
 - Endgültiger Projektname
 - Sprache der Oberfläche (Deutsch, später mehrsprachig?) – Code-Bezeichner: Englisch, Kommentare: Deutsch (entschieden)
-- Lizenz für die Veröffentlichung auf GitHub
+- Lizenz: MIT (entschieden, `LICENSE`)
+- Repository: privat auf GitHub, `havefuntocode/try-to-make-an-erd-modeler-with-agentic-coding`
+  (Remote `origin`, Branch `main`); Commits nur mit der Repo-eigenen Git-Identität
