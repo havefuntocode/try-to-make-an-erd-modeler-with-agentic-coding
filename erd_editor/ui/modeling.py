@@ -37,6 +37,7 @@ from erd_editor.model.types import DEFAULT_SCHEMAS
 from erd_editor.persistence.document import DiagramDocument
 from erd_editor.ui.relationship_dialog import RelationshipDialog
 from erd_editor.ui.table_dialog import TableDialog
+from erd_editor.ui.view_dialog import ViewDialog
 
 DIALECT_LABELS = {Dialect.MYSQL: "MySQL", Dialect.POSTGRESQL: "PostgreSQL", Dialect.MSSQL: "SQL Server"}
 READ_ONLY_HINT = (
@@ -216,7 +217,28 @@ class ModelingMixin:
     def create_table(self, ref: TableRef, table) -> None:
         diagram = self._try(lambda: add_table(self.document.diagram, ref, table))
         if diagram is not None:
-            self.apply_model_change(diagram, f"Tabelle „{ref.table}“ anlegen", added=ref)
+            noun = "View" if table.is_view else "Tabelle"
+            self.apply_model_change(diagram, f"{noun} „{ref.table}“ anlegen", added=ref)
+
+    # ------------------------------------------------------------------ Views
+
+    def _view_candidates(self, database: str) -> list[TableRef]:
+        """Objekte, die eine View in dieser Datenbank benutzen kann."""
+        return [ref for ref, _ in self.document.diagram.tables() if ref.database == database]
+
+    def new_view_dialog(self) -> None:
+        """Modell → Neue View …"""
+        target = self._choose_target()
+        if target is None:
+            return
+        db_name, schema = target
+        db = self.document.diagram.database(db_name)
+        taken = {t.name for t in db.schema(schema).tables}
+        location = f"{db_name}.{schema}" if schema else db_name
+        dialog = ViewDialog(db.dialect, None, taken, location, self._view_candidates(db_name), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            view = dialog.view()
+            self.create_table(TableRef(db_name, schema, view.name), view)
 
     def edit_table(self, ref: TableRef) -> None:
         """Doppelklick auf eine Box."""
@@ -229,6 +251,11 @@ class ModelingMixin:
             return
         taken = {t.name for t in db.schema(ref.schema).tables}
         location = f"{ref.database}.{ref.schema}" if ref.schema else ref.database
+        if table.is_view:
+            dialog = ViewDialog(db.dialect, table, taken, location, self._view_candidates(ref.database), self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.update_table(ref, dialog.view(), {}, final_indexes=True)
+            return
         dialog = TableDialog(db.dialect, table, taken, location, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.update_table(ref, dialog.table(), dialog.column_renames(), final_indexes=True)
@@ -237,7 +264,8 @@ class ModelingMixin:
         diagram = self._try(lambda: replace_table(self.document.diagram, ref, table, renames, final_indexes))
         if diagram is not None:
             new_ref = TableRef(ref.database, ref.schema, table.name)
-            self.apply_model_change(diagram, f"Tabelle „{table.name}“ bearbeiten", renamed=(ref, new_ref))
+            noun = "View" if table.is_view else "Tabelle"
+            self.apply_model_change(diagram, f"{noun} „{table.name}“ bearbeiten", renamed=(ref, new_ref))
 
     def delete_selected_tables(self) -> None:
         refs = [r for r in self.selected_refs() if self.document.diagram.database(r.database).modeled]

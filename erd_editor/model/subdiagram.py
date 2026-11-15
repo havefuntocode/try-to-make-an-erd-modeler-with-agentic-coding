@@ -46,11 +46,11 @@ def existing_tables(diagram: Diagram, tables: list[TableRef]) -> list[TableRef]:
 
 
 def neighbours(diagram: Diagram, tables: set[TableRef]) -> set[TableRef]:
-    """Tabellen, die über einen Fremdschlüssel direkt mit `tables` verbunden sind."""
+    """Tabellen/Views, die direkt mit `tables` verbunden sind (Fremdschlüssel oder View-Abhängigkeit)."""
     result: set[TableRef] = set()
     for ref, table in diagram.tables():
-        for fk in table.foreign_keys:
-            target = fk.referenced_table
+        targets = [fk.referenced_table for fk in table.foreign_keys] + list(table.view_dependencies)
+        for target in targets:
             if ref in tables and diagram.find_table(target) is not None:
                 result.add(target)
             if target in tables:

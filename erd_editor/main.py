@@ -164,6 +164,7 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         model_menu = self.menuBar().addMenu("&Modell")
         model_menu.addAction(self._action("Neue &Datenbank …", self.new_database_dialog))
         model_menu.addAction(self._action("Neue &Tabelle …", self.new_table_dialog, QKeySequence("Ctrl+Shift+N")))
+        model_menu.addAction(self._action("Neue &View …", self.new_view_dialog, QKeySequence("Ctrl+Shift+V")))
         model_menu.addAction(self._action("Tabelle &bearbeiten …", self._edit_selected_table, QKeySequence("Return")))
         model_menu.addAction(self._action("Tabellen &löschen …", self.delete_selected_tables, QKeySequence.StandardKey.Delete))
         model_menu.addSeparator()

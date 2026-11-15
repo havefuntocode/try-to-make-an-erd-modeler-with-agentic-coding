@@ -243,3 +243,124 @@ def test_script_header_counts_views(diagram):
     from erd_editor.export.ddl import generate_script
 
     assert "2 Tabellen, 2 Views" in generate_script(diagram)
+
+
+def test_neighbours_follow_view_dependencies(diagram):
+    from erd_editor.model.subdiagram import neighbours
+
+    assert neighbours(diagram, {shop("v_kunde")}) == {shop("kunde"), shop("v_alles")}
+    assert neighbours(diagram, {shop("bestellung")}) == {shop("v_alles")}
+
+
+# ------------------------------------------------------------------ Modellieren
+
+
+def test_guess_dependencies():
+    from erd_editor.analysis.view_sql import guess_dependencies
+
+    pg = [TableRef("erd", "shop", "kunde"), TableRef("erd", "stammdaten", "land"), TableRef("erd", "shop", "land")]
+    sql = 'SELECT * FROM shop.kunde k LEFT JOIN "stammdaten"."LAND" l ON l.code = k.land_code'
+    assert guess_dependencies(sql, pg) == [pg[0], pg[1]]  # Schema entscheidet
+    assert guess_dependencies("select * from land", pg) == [pg[1], pg[2]]  # ohne Schema: alle gleichnamigen
+    assert guess_dependencies("select * from kunde k join x on 1 -- join land", pg) == [pg[0]]
+    assert guess_dependencies("", pg) == []
+
+
+def test_view_dialog_new_follows_sql_until_edited(qapp):
+    from PySide6.QtCore import Qt
+
+    from erd_editor.ui.view_dialog import ViewDialog
+
+    candidates = [shop("kunde"), shop("bestellung"), shop("v_x")]
+    d = ViewDialog(Dialect.MYSQL, None, {"kunde"}, "shop", candidates)
+    assert not d.box.button(d.box.StandardButton.Ok).isEnabled()  # Name fehlt
+    d.name.setText("kunde")
+    assert "gibt es dort schon" in d.message.text()
+    d.name.setText("v_neu")
+    d.sql.setPlainText("SELECT k.id FROM kunde k JOIN bestellung b ON b.kunde_id = k.id")
+    assert d.dependencies() == [shop("kunde"), shop("bestellung")]
+    d.deps.item(1).setCheckState(Qt.CheckState.Unchecked)  # von Hand geändert …
+    d.sql.setPlainText("SELECT 1 FROM kunde JOIN bestellung ON 1")
+    assert d.dependencies() == [shop("kunde")]  # … bleibt so
+    d.detect_dependencies()
+    assert d.dependencies() == [shop("kunde"), shop("bestellung")]
+    d.add_column(Column("id", "int"))
+    view = d.view()
+    assert view.is_view and view.name == "v_neu" and [c.name for c in view.columns] == ["id"]
+    assert view.definition.startswith("SELECT 1")
+
+
+def test_view_dialog_edit_keeps_saved_selection(qapp, diagram):
+    from erd_editor.ui.view_dialog import ViewDialog
+
+    v = diagram.find_table(shop("v_alles"))
+    candidates = [r for r, _ in diagram.tables()]
+    d = ViewDialog(Dialect.MYSQL, v, {"kunde", "v_alles"}, "shop", candidates)
+    assert shop("v_alles") not in [d.deps.item(i).data(0x0100) for i in range(d.deps.count())]  # nicht sich selbst
+    assert d.dependencies() == [shop("bestellung"), shop("v_kunde")]
+    assert d.box.button(d.box.StandardButton.Ok).isEnabled()  # eigener Name ist erlaubt
+    assert d.view().comment is None
+
+
+@pytest.fixture
+def window(qapp, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from erd_editor.main import MainWindow
+    from erd_editor.model import Index, IndexKind
+
+    def fail(*args):
+        raise AssertionError(f"unerwartetes Hinweisfenster: {args[1:3]}")
+
+    for name in ("warning", "information", "critical"):
+        monkeypatch.setattr(QMessageBox, name, fail)
+    w = MainWindow()
+    w.create_database("shop", Dialect.MYSQL)
+    w.create_table(shop("kunde"), Table("kunde", [Column("id", "int", nullable=False)],
+                                        [Index("PRIMARY", IndexKind.PRIMARY, ("id",))]))
+    yield w
+    w.setWindowModified(False)
+    w.close()
+
+
+def test_create_edit_and_undo_view_in_window(window):
+    window.create_table(shop("v_kunde"), view("v_kunde", "kunde", sql="SELECT id FROM kunde"))
+    assert window.undo_stack.undoText() == "View „v_kunde“ anlegen"
+    assert len(window.scene.dependencies) == 1
+    box = window.scene.entities[shop("v_kunde")]
+    window.update_table(shop("v_kunde"), view("v_kunden", "kunde"), {}, final_indexes=True)
+    assert window.scene.entities[shop("v_kunden")] is box  # gezielt aktualisiert
+    assert window.undo_stack.undoText() == "View „v_kunden“ bearbeiten"
+    window.undo_stack.undo()
+    window.undo_stack.undo()
+    assert shop("v_kunde") not in window.scene.entities and not window.scene.dependencies
+
+
+def test_double_click_on_view_opens_view_dialog(window, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    from erd_editor.ui import modeling
+
+    window.create_table(shop("v_kunde"), view("v_kunde", "kunde"))
+    opened = []
+
+    class FakeDialog:
+        def __init__(self, dialect, table, taken, location, candidates, parent):
+            opened.append((table.name, sorted(c.table for c in candidates)))
+
+        def exec(self):
+            return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(modeling, "ViewDialog", FakeDialog)
+    window.edit_table(shop("v_kunde"))
+    assert opened == [("v_kunde", ["kunde", "v_kunde"])]
+
+
+def test_relationship_tool_refuses_views(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a: warnings.append(a[2]))
+    window.create_table(shop("v_kunde"), view("v_kunde", "kunde"))
+    window.create_relationship(shop("v_kunde"), shop("kunde"))
+    assert warnings and "Views" in warnings[0]

@@ -206,7 +206,10 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       (Roundtrip-Test gegen alle drei Server: Skript ausführen, wieder einlesen, gleiches Schema)
 
 ### Später
-- [ ] Views als eigene Objektart
+- [x] Views als eigene Objektart: einlesen (alle Dialekte, MariaDB über den SQL-Text),
+      abgesetzte Box (gestrichelt, kursiv, „VIEW“), gepunktete Abhängigkeitslinien,
+      modellieren (Modell → Neue View …, Abhängigkeiten aus dem SQL erkannt),
+      SQL-Export in Abhängigkeitsreihenfolge; materialisierte Views noch nicht
 - [ ] Modell mit Datenbank abgleichen (Unterschiede als `ALTER TABLE`)
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
@@ -250,7 +253,11 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
   alle weiteren Klicks ab (siehe `EntityItem.mouseDoubleClickEvent`)
 - `QTest.mouseDClick` schickt nur das DblClick-Ereignis ohne vorheriges Drücken/Loslassen;
   für realistische Doppelklicks `mousePress`, `mouseRelease`, `mouseDClick`, `mouseRelease`
-- Modelländerungen, Rückgängig und Neu einlesen laufen über `show_view(..., keep_view=True)`
+- Views stehen als `Table` mit `kind=VIEW` in derselben Liste wie Tabellen; `definition`
+  enthält nur den SELECT-Teil (MySQL: ohne eigenen Datenbanknamen), `view_dependencies`
+  die benutzten Objekte. `_tables()` im SQL-Export liefert nur echte Tabellen
+- Testschema enthält drei Views (`v_kunde_land`, `v_bestellsumme`, `v_kunde_bestellungen`)
+- - Modelländerungen, Rückgängig und Neu einlesen laufen über `show_view(..., keep_view=True)`
   → `DiagramScene.update_diagram()`; nur bei geänderten Datenbanken/Schemas/Farben/
   Darstellungsgröße wird über `load()` komplett neu aufgebaut
 - Der Tabelleneditor liefert Indexe mit den **neuen** Spaltennamen
