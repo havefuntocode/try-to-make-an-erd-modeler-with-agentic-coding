@@ -129,10 +129,11 @@ class ModelingMixin:
             return
 
         def moved(layout: Layout | None) -> Layout | None:
-            if layout is None or old not in layout.positions:
+            if layout is None:
                 return layout
             positions = {(new if r == old else r): p for r, p in layout.positions.items()}
-            return replace(layout, positions=positions)
+            notes = [replace(n, entity=new) if n.entity == old else n for n in layout.notes]  # Notizen bleiben verbunden
+            return replace(layout, positions=positions, notes=notes)
 
         self.document.layout = moved(self.document.layout)
         for sd in self.document.subdiagrams:

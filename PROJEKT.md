@@ -212,6 +212,9 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       abgesetzte Box (gestrichelt, kursiv, „VIEW“), gepunktete Abhängigkeitslinien,
       modellieren (Modell → Neue View …, Abhängigkeiten aus dem SQL erkannt),
       SQL-Export in Abhängigkeitsreihenfolge; materialisierte Views noch nicht
+- [x] Notizen (Infoboxen): frei oder mit einer Tabelle verbunden, verschieben, Größe ändern,
+      Doppelklick bearbeitet, Kontextmenüs (Tabelle, Notiz, freie Fläche), Entf löscht;
+      gehören zum Layout der jeweiligen Ansicht (je Teildiagramm eigene Notizen)
 - [ ] Modell mit Datenbank abgleichen (Unterschiede als `ALTER TABLE`)
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
@@ -258,6 +261,10 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Views stehen als `Table` mit `kind=VIEW` in derselben Liste wie Tabellen; `definition`
   enthält nur den SELECT-Teil (MySQL: ohne eigenen Datenbanknamen), `view_dependencies`
   die benutzten Objekte. `_tables()` im SQL-Export liefert nur echte Tabellen
+- Notizen liegen in `Layout.notes` (`Note`: id, text, frame, entity) und laufen damit über
+  `record_layout()`/Rückgängig, Speichern und Teildiagramme; Szene: `apply_notes()`,
+  Bedienung im `NotesMixin` (`ui/notes.py`). Verschieben einer Tabelle von Hand nimmt
+  ihre Notiz nicht mit, „Automatisch anordnen“ schon
 - Testschema enthält drei Views (`v_kunde_land`, `v_bestellsumme`, `v_kunde_bestellungen`)
 - - Modelländerungen, Rückgängig und Neu einlesen laufen über `show_view(..., keep_view=True)`
   → `DiagramScene.update_diagram()`; nur bei geänderten Datenbanken/Schemas/Farben/

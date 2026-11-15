@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from erd_editor.analysis.overrides import RelationshipKey, RelationshipOverride
-from erd_editor.model.layout import MAX_SCALE, MIN_SCALE, ColumnMode, DisplayOptions, Frame
+from erd_editor.model.layout import MAX_SCALE, MIN_SCALE, ColumnMode, DisplayOptions, Frame, Note
 from erd_editor.model import (
     Column,
     ConnectionProfile,
@@ -283,7 +283,7 @@ def _layout_to_dict(layout: Layout) -> dict[str, Any]:
         if schemas:
             entry["schemas"] = [{"name": s, "frame": [round(v, 1) for v in f]} for s, f in schemas]
         databases.append(entry)
-    return {
+    data = {
         "notation": layout.notation,
         "scale": layout.scale,
         "display": {
@@ -298,6 +298,17 @@ def _layout_to_dict(layout: Layout) -> dict[str, Any]:
             for ref, (x, y) in sorted(layout.positions.items(), key=lambda kv: _sort_key(kv[0]))
         ],
     }
+    if layout.notes:  # nur wenn vorhanden – ältere Dateien bleiben unverändert
+        data["notes"] = [
+            {
+                "id": n.id,
+                "text": n.text,
+                "frame": [round(v, 1) for v in n.frame],
+                "entity": _ref_to_dict(n.entity) if n.entity else None,
+            }
+            for n in layout.notes
+        ]
+    return data
 
 
 def _sort_key(ref: TableRef) -> tuple[str, str, str]:
@@ -319,6 +330,11 @@ def _layout_from_dict(d: dict[str, Any]) -> Layout:
         scale=min(max(float(d.get("scale", 1.0)), MIN_SCALE), MAX_SCALE),
         notation=d.get("notation", "crowsfoot"),
         display=_display_from_dict(d.get("display", {})),
+        notes=[
+            Note(str(n["id"]), str(n.get("text", "")), _frame(n["frame"]),
+                 _ref_from_dict(n["entity"]) if n.get("entity") else None)
+            for n in d.get("notes", [])
+        ],
     )
 
 

@@ -17,13 +17,14 @@ from erd_editor.analysis import ZERO_OR_MANY, RelationshipKey, RelationshipOverr
 from erd_editor.diagram.container_item import ContainerItem
 from erd_editor.diagram.dependency_item import DependencyItem
 from erd_editor.diagram.entity_item import EntityItem
+from erd_editor.diagram.note_item import NoteItem, NoteLinkItem
 from erd_editor.diagram.palette import colors_for
 from erd_editor.diagram.relation_item import RelationItem
 from erd_editor.diagram.routing import Side, choose_sides, place, route_avoiding
 from erd_editor.diagram.schema_item import SchemaItem
 from erd_editor.diagram.style import EntityStyle
 from erd_editor.layout import LayoutNode, LayoutOptions, layered_layout
-from erd_editor.model import Diagram, DisplayOptions, Layout, TableRef
+from erd_editor.model import Diagram, DisplayOptions, Layout, Note, TableRef
 from erd_editor.model.layout import MAX_SCALE, MIN_SCALE
 from erd_editor.notation import CrowsFootNotation, Notation, notation_for
 
@@ -44,6 +45,11 @@ class DiagramScene(QGraphicsScene):
     # Rechtsklick auf eine Linie: RelationItem, Bildschirmposition
     relation_context_requested = Signal(object, object)
     entity_activated = Signal(object)  # Doppelklick auf eine Box: TableRef
+    note_activated = Signal(str)  # Doppelklick auf eine Notiz: ID
+    # Rechtsklick: Notiz (ID), Box (TableRef) oder freie Fläche (Szenenposition) + Bildschirmposition
+    note_context_requested = Signal(str, object)
+    entity_context_requested = Signal(object, object)
+    canvas_context_requested = Signal(object, object)
 
     def __init__(self, parent=None, notation: Notation | None = None) -> None:
         super().__init__(parent)
@@ -52,6 +58,8 @@ class DiagramScene(QGraphicsScene):
         self.entities: dict[TableRef, EntityItem] = {}
         self.relations: list[RelationItem] = []
         self.dependencies: list[DependencyItem] = []  # View → benutzte Objekte
+        self.notes: dict[str, NoteItem] = {}  # Notizen (Infoboxen), Reihenfolge wie im Layout
+        self.note_links: dict[str, NoteLinkItem] = {}  # Notiz-ID → Linie zur Tabelle
         self.containers: dict[str, ContainerItem] = {}
         self.schema_items: dict[tuple[str, str], SchemaItem] = {}
         self.diagram: Diagram | None = None
@@ -81,6 +89,8 @@ class DiagramScene(QGraphicsScene):
         """
         self.relations = []
         self.dependencies = []
+        self.notes = {}
+        self.note_links = {}
         self.entities = {}
         self.containers = {}
         self.schema_items = {}
@@ -107,6 +117,7 @@ class DiagramScene(QGraphicsScene):
         else:
             self._apply_layout(layout)
             self._apply_frames(layout)
+            self.apply_notes(layout.notes)
 
     def _add_container(self, database, color_index: int) -> ContainerItem:
         container = ContainerItem(database, colors_for(color_index), color_index, self.display_scale)
@@ -245,6 +256,7 @@ class DiagramScene(QGraphicsScene):
             layout = replace(self.current_layout(), positions=known)
         self._apply_layout(layout)
         self._apply_frames(layout)
+        self.apply_notes(layout.notes)  # Linien zu ersetzten/umbenannten Boxen neu verbinden
         return True
 
     def _can_update(self, diagram: Diagram, layout: Layout | None) -> bool:
@@ -369,12 +381,19 @@ class DiagramScene(QGraphicsScene):
         self.update_relations()
 
     def contextMenuEvent(self, event: QGraphicsSceneContextMenuEvent) -> None:
-        for item in self.items(event.scenePos()):
-            if isinstance(item, RelationItem):
+        for item in self.items(event.scenePos()):  # oberstes Item zuerst
+            if isinstance(item, NoteItem):
+                self.note_context_requested.emit(item.id, event.screenPos())
+            elif isinstance(item, EntityItem):
+                self.entity_context_requested.emit(item.ref, event.screenPos())
+            elif isinstance(item, RelationItem):
                 self.relation_context_requested.emit(item, event.screenPos())
-                event.accept()
-                return
-        super().contextMenuEvent(event)
+            else:
+                continue
+            event.accept()
+            return
+        self.canvas_context_requested.emit(event.scenePos(), event.screenPos())
+        event.accept()
 
     @staticmethod
     def _assign_colors(diagram: Diagram, saved: dict[str, int]) -> dict[str, int]:
@@ -411,6 +430,7 @@ class DiagramScene(QGraphicsScene):
             scale=self.display_scale,
             display=self.display_options,
             notation=self.notation.key,
+            notes=[item.note for item in self.notes.values()],
         )
 
     # ------------------------------------------------------------------ Anordnen
@@ -422,7 +442,9 @@ class DiagramScene(QGraphicsScene):
             refs_by_db[ref.database].append(ref)
         for frame in self.frames():
             frame.manual_rect = None
+        offsets = self._note_offsets()
         self._set_positions(self._layout_databases(refs_by_db, 0.0))
+        self._restore_note_offsets(offsets)
         if notify:
             self.layout_changed.emit()
 
@@ -563,6 +585,11 @@ class DiagramScene(QGraphicsScene):
                 r = frame.manual_rect
                 x, y = scaled(r.x(), r.y())
                 frame.manual_rect = QRectF(x, y, r.width() * ratio, r.height() * ratio)
+        for note in self.notes.values():
+            x, y = scaled(note.pos().x(), note.pos().y())
+            w, h = note.rect.width() * ratio, note.rect.height() * ratio
+            note.set_scale(scale)
+            note.set_note(Note(note.id, note.text, (x, y, w, h), note.entity))
         self._set_positions(positions)
         self.layout_changed.emit()
 
@@ -594,7 +621,10 @@ class DiagramScene(QGraphicsScene):
         for key, schema in self.schema_items.items():
             frame = layout.schema_frames.get(key)
             schema.manual_rect = QRectF(*frame) if frame else None
+        for note in self.notes.values():
+            note.set_scale(self.display_scale)
         self._set_positions({ref: pos for ref, pos in layout.positions.items() if ref in self.entities})
+        self.apply_notes(layout.notes)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -618,6 +648,11 @@ class DiagramScene(QGraphicsScene):
             return f"„{moved[0].table}“ verschieben" if len(moved) == 1 else f"{len(moved)} Tabellen verschieben"
         if after.frames != before.frames or after.schema_frames != before.schema_frames:
             return "Rahmen aufziehen"
+        if after.notes != before.notes:
+            old = {n.id: n for n in before.notes}
+            changed = [n for n in after.notes if old.get(n.id) != n]
+            resized = any(n.id in old and n.frame[2:] != old[n.id].frame[2:] for n in changed)
+            return "Notizgröße ändern" if resized else "Notiz verschieben"
         return "Layout ändern"
 
     # ------------------------------------------------------------------ Darstellungsoptionen
@@ -688,6 +723,98 @@ class DiagramScene(QGraphicsScene):
         self.update_relations()
         self.layout_changed.emit()
 
+    # ------------------------------------------------------------------ Notizen
+
+    def apply_notes(self, notes: list[Note]) -> None:
+        """Notizen an `notes` angleichen: vorhandene Items behalten, neue anlegen, fehlende entfernen."""
+        wanted = {n.id: n for n in notes}
+        for note_id in [i for i in self.notes if i not in wanted]:
+            self.removeItem(self.notes.pop(note_id))
+        result: dict[str, NoteItem] = {}
+        for note in notes:
+            item = self.notes.get(note.id)
+            if item is None:
+                item = NoteItem(note, self.display_scale)
+                self.addItem(item)
+            elif item.note != note:
+                item.set_note(note)
+            result[note.id] = item
+        self.notes = result
+        self._update_note_links()
+
+    def note_changed(self, item: NoteItem) -> None:
+        """Wird von NoteItem beim Verschieben/Größe ändern aufgerufen."""
+        link = self.note_links.get(item.id)
+        if link is not None:
+            link.update_geometry()
+        self.layout_changed.emit()
+
+    def _update_note_links(self) -> None:
+        """Linien zu verbundenen Tabellen anlegen, nachführen oder (Tabelle fehlt) entfernen."""
+        for note_id, note in self.notes.items():
+            entity = self.entities.get(note.entity) if note.entity is not None else None
+            link = self.note_links.get(note_id)
+            if link is not None and (entity is None or link.entity_item is not entity or link.note_item is not note):
+                self.removeItem(self.note_links.pop(note_id))
+                link = None
+            if entity is not None:
+                if link is None:
+                    link = NoteLinkItem(note, entity)
+                    self.addItem(link)
+                    self.note_links[note_id] = link
+                link.update_geometry()
+        for note_id in [i for i in self.note_links if i not in self.notes]:
+            self.removeItem(self.note_links.pop(note_id))
+
+    def _note_offsets(self) -> dict[str, QPointF]:
+        """Abstand verbundener Notizen zu ihrer Tabelle (damit sie beim Anordnen mitwandern)."""
+        result = {}
+        for note in self.notes.values():
+            entity = self.entities.get(note.entity) if note.entity is not None else None
+            if entity is not None:
+                result[note.id] = note.pos() - entity.pos()
+        return result
+
+    def _restore_note_offsets(self, offsets: dict[str, QPointF]) -> None:
+        for note_id, offset in offsets.items():
+            note = self.notes[note_id]
+            note.setPos(self.entities[note.entity].pos() + offset)
+
+    def _free_note_spot(self, rect: QRectF, w: float, h: float) -> tuple:
+        """Platz für eine Notiz an `rect`: rechts, oben, links, unten – erst nah, dann weiter weg.
+
+        Frei heißt: keine Box und keine andere Notiz im Weg. Findet sich nichts,
+        kommt sie rechts neben die Tabelle.
+        """
+        gap = 40 * self.display_scale
+        obstacles = [e.mapRectToScene(e.rect) for e in self.entities.values()]
+        obstacles += [n.mapRectToScene(n.rect) for n in self.notes.values()]
+        margin = 12 * self.display_scale
+        for distance in (gap, gap * 3, gap * 6):
+            for x, y in (
+                (rect.right() + distance, rect.top()),  # rechts
+                (rect.left(), rect.top() - distance - h),  # oben
+                (rect.left() - distance - w, rect.top()),  # links
+                (rect.left(), rect.bottom() + distance),  # unten
+            ):
+                spot = QRectF(x, y, w, h).adjusted(-margin, -margin, margin, margin)
+                if not any(spot.intersects(o) for o in obstacles):
+                    return x, y, w, h
+        return rect.right() + gap, rect.top(), w, h
+
+    def new_note_frame(self, entity: TableRef | None = None, at: QPointF | None = None) -> tuple:
+        """Rahmen für eine neue Notiz: rechts neben der Tabelle oder an `at` (Szenenkoordinaten)."""
+        from erd_editor.diagram.note_item import DEFAULT_SIZE
+
+        w, h = DEFAULT_SIZE[0] * self.display_scale, DEFAULT_SIZE[1] * self.display_scale
+        item = self.entities.get(entity) if entity is not None else None
+        if item is not None:
+            return self._free_note_spot(item.mapRectToScene(item.rect), w, h)
+        if at is None:
+            bounds = self.itemsBoundingRect()
+            at = bounds.center() if not bounds.isNull() else QPointF(0, 0)
+        return at.x(), at.y(), w, h
+
     # ------------------------------------------------------------------ Linienführung
 
     def entity_moved(self, item: EntityItem) -> None:
@@ -712,6 +839,7 @@ class DiagramScene(QGraphicsScene):
         Schritt 3: Linien führen.
         """
         self._route_dependencies()
+        self._update_note_links()
         if not self.relations:
             return
         f = self.display_scale

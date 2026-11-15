@@ -1,6 +1,6 @@
 """Neutrales Datenmodell (dataclasses, ohne Qt)."""
 
-from erd_editor.model.layout import ColumnMode, DisplayOptions, Layout
+from erd_editor.model.layout import ColumnMode, DisplayOptions, Layout, Note
 from erd_editor.model.subdiagram import Subdiagram, filter_diagram
 from erd_editor.model.schema import (
     Column,
@@ -29,6 +29,7 @@ __all__ = [
     "Index",
     "IndexKind",
     "Layout",
+    "Note",
     "Schema",
     "Subdiagram",
     "Table",

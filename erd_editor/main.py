@@ -38,6 +38,7 @@ from erd_editor.model import ColumnMode, ConnectionProfile, Database, Diagram, D
 from erd_editor.persistence import credentials
 from erd_editor.ui.commands import DocumentCommand, LayoutCommand
 from erd_editor.ui.modeling import ModelingMixin
+from erd_editor.ui.notes import NotesMixin
 from erd_editor.ui.subdiagram_tabs import MAIN_VIEW_TITLE, SubdiagramTabsMixin
 from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory, needs_password
 from erd_editor.persistence.document import (
@@ -95,7 +96,7 @@ def describe_changes(old: Diagram, new: Diagram) -> str:
     return f"Neu eingelesen – {added} neu, {removed} entfernt"
 
 
-class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
+class MainWindow(ModelingMixin, NotesMixin, SubdiagramTabsMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.resize(1200, 800)
@@ -113,6 +114,10 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         self.scene.gesture_finished.connect(self._push_gesture)
         self.scene.relation_context_requested.connect(self.relation_menu)
         self.scene.entity_activated.connect(self.edit_table)
+        self.scene.note_activated.connect(self.edit_note)
+        self.scene.note_context_requested.connect(self.note_menu)
+        self.scene.entity_context_requested.connect(self.entity_menu)
+        self.scene.canvas_context_requested.connect(self.canvas_menu)
         self.view.relation_drawn.connect(self.on_relation_drawn)
         self._init_tabs()
         self._create_menus()
@@ -156,6 +161,9 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         edit_menu.addAction(undo_action)
         edit_menu.addAction(redo_action)
         self.undo_action, self.redo_action = undo_action, redo_action
+        edit_menu.addSeparator()
+        edit_menu.addAction(self._action("&Notiz hinzufügen …", lambda: self.add_note(), QKeySequence("Ctrl+Shift+K")))
+        edit_menu.addAction(self._action("Markiertes &löschen", self.delete_selection, QKeySequence.StandardKey.Delete))
 
         layout_menu = self.menuBar().addMenu("A&nordnen")
         layout_menu.addAction(self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L")))
@@ -166,7 +174,7 @@ class MainWindow(ModelingMixin, SubdiagramTabsMixin, QMainWindow):
         model_menu.addAction(self._action("Neue &Tabelle …", self.new_table_dialog, QKeySequence("Ctrl+Shift+N")))
         model_menu.addAction(self._action("Neue &View …", self.new_view_dialog, QKeySequence("Ctrl+Shift+V")))
         model_menu.addAction(self._action("Tabelle &bearbeiten …", self._edit_selected_table, QKeySequence("Return")))
-        model_menu.addAction(self._action("Tabellen &löschen …", self.delete_selected_tables, QKeySequence.StandardKey.Delete))
+        model_menu.addAction(self._action("Tabellen &löschen …", self.delete_selected_tables))
         model_menu.addSeparator()
         model_menu.addAction(self._action("Be&ziehung zeichnen", self.start_relation_tool, QKeySequence("Ctrl+B")))
         model_menu.addSeparator()

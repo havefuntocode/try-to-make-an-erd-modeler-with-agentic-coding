@@ -36,6 +36,22 @@ class DisplayOptions:
     show_comments: bool = False
 
 
+@dataclass(frozen=True)
+class Note:
+    """Notiz (Infobox) im Diagramm – frei oder mit einer Tabelle verbunden.
+
+    Gehört zum Layout, nicht zum Schema: übersteht Neu einlesen, geht auch
+    bei eingelesenen Datenbanken und ist je Teildiagramm eigen. Fehlt die
+    verbundene Tabelle (gelöscht, nicht im Teildiagramm), bleibt die Notiz
+    stehen, nur ohne Linie.
+    """
+
+    id: str
+    text: str
+    frame: Frame  # Szenenkoordinaten
+    entity: TableRef | None = None
+
+
 @dataclass
 class Layout:
     positions: dict[TableRef, tuple[float, float]] = field(default_factory=dict)  # linke obere Ecke
@@ -45,3 +61,4 @@ class Layout:
     scale: float = 1.0  # Darstellungsgröße (1.0 = 100 %)
     display: DisplayOptions = field(default_factory=DisplayOptions)
     notation: str = "crowsfoot"
+    notes: list[Note] = field(default_factory=list)
