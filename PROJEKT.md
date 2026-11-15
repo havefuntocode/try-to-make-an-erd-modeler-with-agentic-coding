@@ -215,6 +215,9 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
 - [x] Notizen (Infoboxen): frei oder mit einer Tabelle verbunden, verschieben, Größe ändern,
       Doppelklick bearbeitet, Kontextmenüs (Tabelle, Notiz, freie Fläche), Entf löscht;
       gehören zum Layout der jeweiligen Ansicht (je Teildiagramm eigene Notizen)
+- [x] Symbolleiste: Datei, Rückgängig, Modellieren (Datenbank, Tabelle, View, Beziehung,
+      Notiz), Zoom/Anordnen, PDF/SQL; eigene SVG-Icons, Tooltips mit Tastenkürzel,
+      ausgegraut, wenn nicht möglich; Rechtsklick: nur Symbole / mit Text (gespeichert)
 - [ ] Modell mit Datenbank abgleichen (Unterschiede als `ALTER TABLE`)
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
@@ -271,6 +274,14 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
   Darstellungsgröße wird über `load()` komplett neu aufgebaut
 - Der Tabelleneditor liefert Indexe mit den **neuen** Spaltennamen
   (`replace_table(..., final_indexes=True)`), Fremdschlüssel mit den alten
+
+- Symbolleiste (`ui/toolbar.py`): nutzt dieselben `QAction`s wie die Menüs
+  (`named_actions`, beim Menübau über `_named()` gemerkt); Zustände in `_sync_toolbar()`,
+  aufgerufen aus `_sync_menus()`. Icons in `resources/toolbar/*.svg`, erzeugt mit
+  `tools/make_toolbar_icons.py` (Farben/Formen dort ändern, dann neu erzeugen)
+- Einstellungen (z. B. Darstellung der Symbolleiste) über `QSettings` in der Registry
+  (`HKCU\Software\ErdEditor`); Tests leiten sie per `conftest._settings_in_tmp` in eine
+  temporäre INI-Datei um
 
 ### Anwendungssymbol und späterer Build
 

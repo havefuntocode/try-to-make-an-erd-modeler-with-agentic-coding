@@ -39,6 +39,7 @@ from erd_editor.persistence import credentials
 from erd_editor.ui.commands import DocumentCommand, LayoutCommand
 from erd_editor.ui.modeling import ModelingMixin
 from erd_editor.ui.notes import NotesMixin
+from erd_editor.ui.toolbar import ToolbarMixin
 from erd_editor.ui.subdiagram_tabs import MAIN_VIEW_TITLE, SubdiagramTabsMixin
 from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory, needs_password
 from erd_editor.persistence.document import (
@@ -96,7 +97,7 @@ def describe_changes(old: Diagram, new: Diagram) -> str:
     return f"Neu eingelesen – {added} neu, {removed} entfernt"
 
 
-class MainWindow(ModelingMixin, NotesMixin, SubdiagramTabsMixin, QMainWindow):
+class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.resize(1200, 800)
@@ -121,6 +122,8 @@ class MainWindow(ModelingMixin, NotesMixin, SubdiagramTabsMixin, QMainWindow):
         self.view.relation_drawn.connect(self.on_relation_drawn)
         self._init_tabs()
         self._create_menus()
+        self._create_toolbar()
+        self._sync_toolbar()
         self._update_title()
         self.statusBar().showMessage(USAGE_HINT)
 
@@ -133,20 +136,27 @@ class MainWindow(ModelingMixin, NotesMixin, SubdiagramTabsMixin, QMainWindow):
         action.triggered.connect(slot)
         return action
 
+    def _named(self, name: str, action: QAction) -> QAction:
+        """Aktion unter einem Namen merken (Symbolleiste, Zustände)."""
+        if not hasattr(self, "named_actions"):
+            self.named_actions: dict[str, QAction] = {}
+        self.named_actions[name] = action
+        return action
+
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&Datei")
-        file_menu.addAction(self._action("&Neu", self.new_document, QKeySequence.StandardKey.New))
-        file_menu.addAction(self._action("&Datenbank einlesen …", self.open_connection_dialog, QKeySequence("Ctrl+D")))
+        file_menu.addAction(self._named("new", self._action("&Neu", self.new_document, QKeySequence.StandardKey.New)))
+        file_menu.addAction(self._named("read_database", self._action("&Datenbank einlesen …", self.open_connection_dialog, QKeySequence("Ctrl+D"))))
         file_menu.addSeparator()
-        file_menu.addAction(self._action("Ö&ffnen …", self.open_dialog, QKeySequence.StandardKey.Open))
-        file_menu.addAction(self._action("&Speichern", self.save, QKeySequence.StandardKey.Save))
+        file_menu.addAction(self._named("open", self._action("Ö&ffnen …", self.open_dialog, QKeySequence.StandardKey.Open)))
+        file_menu.addAction(self._named("save", self._action("&Speichern", self.save, QKeySequence.StandardKey.Save)))
         file_menu.addAction(self._action("Speichern &unter …", self.save_as, QKeySequence("Ctrl+Shift+S")))
         file_menu.addSeparator()
-        self.reload_action = self._action("&Neu einlesen", self.reload, QKeySequence("F5"))
+        self.reload_action = self._named("reload", self._action("&Neu einlesen", self.reload, QKeySequence("F5")))
         file_menu.addAction(self.reload_action)
         file_menu.addSeparator()
         file_menu.addAction(self._action("&Drucken …", self.print_dialog, QKeySequence.StandardKey.Print))
-        file_menu.addAction(self._action("Als &PDF exportieren …", self.export_pdf_dialog, QKeySequence("Ctrl+Shift+P")))
+        file_menu.addAction(self._named("export_pdf", self._action("Als &PDF exportieren …", self.export_pdf_dialog, QKeySequence("Ctrl+Shift+P"))))
         file_menu.addAction(self._action("Als P&NG exportieren …", self.export_png_dialog, QKeySequence("Ctrl+Shift+E")))
         file_menu.addAction(self._action("Als S&VG exportieren …", self.export_svg_dialog, QKeySequence("Ctrl+Shift+G")))
         file_menu.addAction(self._action("Als S&QL-Skript exportieren …", self.sql_export_dialog))
@@ -161,25 +171,30 @@ class MainWindow(ModelingMixin, NotesMixin, SubdiagramTabsMixin, QMainWindow):
         edit_menu.addAction(undo_action)
         edit_menu.addAction(redo_action)
         self.undo_action, self.redo_action = undo_action, redo_action
+        self._named("undo", undo_action)
+        self._named("redo", redo_action)
         edit_menu.addSeparator()
-        edit_menu.addAction(self._action("&Notiz hinzufügen …", lambda: self.add_note(), QKeySequence("Ctrl+Shift+K")))
+        edit_menu.addAction(self._named("add_note", self._action("&Notiz hinzufügen …", lambda: self.add_note(), QKeySequence("Ctrl+Shift+K"))))
         edit_menu.addAction(self._action("Markiertes &löschen", self.delete_selection, QKeySequence.StandardKey.Delete))
 
         layout_menu = self.menuBar().addMenu("A&nordnen")
-        layout_menu.addAction(self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L")))
+        layout_menu.addAction(self._named("auto_layout", self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L"))))
         layout_menu.addAction(self._action("&Rahmen an Inhalt anpassen", self.fit_frames))
 
         model_menu = self.menuBar().addMenu("&Modell")
-        model_menu.addAction(self._action("Neue &Datenbank …", self.new_database_dialog))
-        model_menu.addAction(self._action("Neue &Tabelle …", self.new_table_dialog, QKeySequence("Ctrl+Shift+N")))
-        model_menu.addAction(self._action("Neue &View …", self.new_view_dialog, QKeySequence("Ctrl+Shift+V")))
+        model_menu.addAction(self._named("new_database", self._action("Neue &Datenbank …", self.new_database_dialog)))
+        model_menu.addAction(self._named("new_table", self._action("Neue &Tabelle …", self.new_table_dialog, QKeySequence("Ctrl+Shift+N"))))
+        model_menu.addAction(self._named("new_view", self._action("Neue &View …", self.new_view_dialog, QKeySequence("Ctrl+Shift+V"))))
         model_menu.addAction(self._action("Tabelle &bearbeiten …", self._edit_selected_table, QKeySequence("Return")))
         model_menu.addAction(self._action("Tabellen &löschen …", self.delete_selected_tables))
         model_menu.addSeparator()
-        model_menu.addAction(self._action("Be&ziehung zeichnen", self.start_relation_tool, QKeySequence("Ctrl+B")))
+        relation_action = self._named("relation_tool", QAction("Be&ziehung zeichnen", self, checkable=True))
+        relation_action.setShortcut(QKeySequence("Ctrl+B"))
+        relation_action.triggered.connect(self.toggle_relation_tool)
+        model_menu.addAction(relation_action)
         model_menu.addSeparator()
         model_menu.addAction(self._action("Als &Modell übernehmen …", self.take_over_dialog))
-        model_menu.addAction(self._action("&SQL-Skript erzeugen …", self.sql_export_dialog, QKeySequence("Ctrl+Shift+Q")))
+        model_menu.addAction(self._named("export_sql", self._action("&SQL-Skript erzeugen …", self.sql_export_dialog, QKeySequence("Ctrl+Shift+Q"))))
 
         sub_menu = self.menuBar().addMenu("&Teildiagramm")
         sub_menu.addAction(self._action("&Neu …", self.new_subdiagram, QKeySequence("Ctrl+T")))
@@ -192,9 +207,9 @@ class MainWindow(ModelingMixin, NotesMixin, SubdiagramTabsMixin, QMainWindow):
         sub_menu.addAction(self._action("Vorige Ansicht", lambda: self.step_view(-1), QKeySequence("Ctrl+PgUp")))
 
         view_menu = self.menuBar().addMenu("&Ansicht")
-        view_menu.addAction(self._action("Vergrößern", self.view.zoom_in, [QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+=")]))
-        view_menu.addAction(self._action("Verkleinern", self.view.zoom_out, QKeySequence.StandardKey.ZoomOut))
-        view_menu.addAction(self._action("Ganzes Diagramm", self.view.zoom_to_fit, QKeySequence("Ctrl+0")))
+        view_menu.addAction(self._named("zoom_in", self._action("Vergrößern", self.view.zoom_in, [QKeySequence.StandardKey.ZoomIn, QKeySequence("Ctrl+=")])))
+        view_menu.addAction(self._named("zoom_out", self._action("Verkleinern", self.view.zoom_out, QKeySequence.StandardKey.ZoomOut)))
+        view_menu.addAction(self._named("zoom_fit", self._action("Ganzes Diagramm", self.view.zoom_to_fit, QKeySequence("Ctrl+0"))))
         view_menu.addAction(self._action("100 %", lambda: self.view.set_zoom(1.0), QKeySequence("Ctrl+1")))
         view_menu.addSeparator()
 
@@ -412,6 +427,7 @@ class MainWindow(ModelingMixin, NotesMixin, SubdiagramTabsMixin, QMainWindow):
         self._sync_scale_menu()
         self._sync_display_menu()
         self._sync_notation_menu()
+        self._sync_toolbar()
 
     def set_notation(self, key: str) -> None:
         self.record_layout(f"Notation {NOTATIONS[key].name}", lambda: self.scene.set_notation(key))

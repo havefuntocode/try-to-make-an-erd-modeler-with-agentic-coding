@@ -16,4 +16,4 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.setuptools.package-data]
-erd_editor = ["resources/icons/*.svg", "resources/app.ico"]
+erd_editor = ["resources/icons/*.svg", "resources/toolbar/*.svg", "resources/app.ico"]

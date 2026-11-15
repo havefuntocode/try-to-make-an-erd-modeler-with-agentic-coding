@@ -188,3 +188,14 @@ def build_schema_test_diagram(database: str = "erd") -> Diagram:
 @pytest.fixture
 def schema_diagram() -> Diagram:
     return build_schema_test_diagram()
+
+
+@pytest.fixture(autouse=True)
+def _settings_in_tmp(monkeypatch, tmp_path):
+    """Programmeinstellungen (QSettings) in eine temporäre INI-Datei statt in die Windows-Registry."""
+    from PySide6.QtCore import QSettings
+
+    from erd_editor.ui import toolbar
+
+    ini = str(tmp_path / "settings.ini")
+    monkeypatch.setattr(toolbar, "QSettings", lambda *a: QSettings(ini, QSettings.Format.IniFormat))
