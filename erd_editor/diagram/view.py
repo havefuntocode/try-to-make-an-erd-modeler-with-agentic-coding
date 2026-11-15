@@ -33,6 +33,8 @@ class DiagramView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self._pan_start: QPoint | None = None
+        # Ganzes Diagramm zeigen und der Fenstergröße folgen, bis von Hand gezoomt wird
+        self.fit_mode = True
         self.relation_mode = False
         self._relation_start = None  # EntityItem, an dem die Linie beginnt
         self._rubber_line: QGraphicsLineItem | None = None
@@ -43,9 +45,14 @@ class DiagramView(QGraphicsView):
     def zoom(self) -> float:
         return self.transform().m11()
 
-    def set_zoom(self, factor: float) -> None:
+    def _scale_to(self, factor: float) -> None:
         factor = max(self.MIN_ZOOM, min(self.MAX_ZOOM, factor))
         self.scale(factor / self.zoom, factor / self.zoom)
+
+    def set_zoom(self, factor: float) -> None:
+        """Zoom von Hand festlegen – beendet das automatische Einpassen."""
+        self.fit_mode = False
+        self._scale_to(factor)
 
     def zoom_in(self) -> None:
         self.set_zoom(self.zoom * self.ZOOM_STEP)
@@ -54,12 +61,20 @@ class DiagramView(QGraphicsView):
         self.set_zoom(self.zoom / self.ZOOM_STEP)
 
     def zoom_to_fit(self) -> None:
+        """Ganzes Diagramm zeigen; bis zum nächsten Zoomen von Hand folgt es der Fenstergröße."""
+        self.fit_mode = True
         if self.scene() is None or not self.scene().items():
             return
         rect = self.scene().itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
         if self.zoom > 1.0:  # kleine Diagramme nicht über 100 % aufblasen
-            self.set_zoom(1.0)
+            self._scale_to(1.0)
+
+    def resizeEvent(self, event) -> None:
+        """Fenster maximiert oder Größe geändert: im Einpass-Modus neu einpassen."""
+        super().resizeEvent(event)
+        if self.fit_mode:
+            self.zoom_to_fit()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         steps = event.angleDelta().y() / 120

@@ -139,6 +139,8 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - Verbindung anlegen, Dialekt wählen, Datenbank/Schema auswählen
 - Schema einlesen, Diagramm automatisch anordnen
 - Boxen und Rahmen verschieben, zoomen, scrollen
+- „Ganzes Diagramm“ (Strg+0) folgt der Fenstergröße (z. B. Vollbild), bis man selbst
+  zoomt; kleine Diagramme höchstens 100 %
 - **Neu einlesen ohne Layoutverlust:** neue Tabellen kommen hinzu, bestehende Positionen bleiben
 
 ## 8. Speicherung

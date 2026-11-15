@@ -1,7 +1,7 @@
 """Tests für die Darstellung: Symbole, Entitätsboxen, Szene."""
 
 import pytest
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QImage, QPainter
 
 from erd_editor.diagram.entity_item import EntityItem
@@ -181,3 +181,68 @@ def test_primary_key_listed_first(qapp):
     )
     item = EntityItem(shop("t"), table)
     assert [r.kind for r in item._indexes] == ["PRIMARY", "INDEX"]
+
+
+class TestFitToWindow:
+    """Ganzes Diagramm folgt der Fenstergröße – bis man selbst zoomt."""
+
+    @pytest.fixture
+    def view(self, qapp, test_schema):
+        scene = DiagramScene()
+        scene.load(test_schema)
+        v = DiagramView(scene)
+        v.resize(600, 400)
+        v.show()
+        qapp.processEvents()
+        v.zoom_to_fit()
+        yield v
+        v.close()
+
+    def resized(self, qapp, view, w, h):
+        view.resize(w, h)
+        qapp.processEvents()
+        return view.zoom
+
+    def test_bigger_window_enlarges_diagram(self, qapp, view):
+        small = view.zoom
+        assert view.fit_mode and small < 1.0
+        assert self.resized(qapp, view, 1200, 800) > small * 1.5  # z. B. Vollbild
+        assert self.resized(qapp, view, 600, 400) == pytest.approx(small)
+
+    def test_manual_zoom_stops_following(self, qapp, view):
+        for manual in (view.zoom_in, view.zoom_out, lambda: view.set_zoom(0.5)):
+            view.zoom_to_fit()
+            manual()
+            assert not view.fit_mode
+            before = view.zoom
+            assert self.resized(qapp, view, 1300, 900) == pytest.approx(before)
+            self.resized(qapp, view, 600, 400)
+
+    def test_wheel_stops_following(self, qapp, view):
+        from PySide6.QtCore import QPoint, QPointF
+        from PySide6.QtGui import QWheelEvent
+
+        event = QWheelEvent(QPointF(10, 10), QPointF(10, 10), QPoint(), QPoint(0, 120),
+                            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                            Qt.ScrollPhase.NoScrollPhase, False)
+        view.wheelEvent(event)
+        assert not view.fit_mode
+
+    def test_ctrl_0_resumes_following(self, qapp, view):
+        view.set_zoom(0.3)
+        view.zoom_to_fit()
+        assert view.fit_mode
+        assert self.resized(qapp, view, 1200, 800) > 0.3
+
+    def test_small_diagram_stays_at_100_percent(self, qapp):
+        from erd_editor.model import Column, Database, Diagram, Dialect, Schema, Table
+
+        scene = DiagramScene()
+        scene.load(Diagram([Database("x", Dialect.MYSQL, [Schema(None, [Table("t", [Column("id", "int")])])])]))
+        v = DiagramView(scene)
+        v.resize(800, 600)
+        v.show()
+        v.zoom_to_fit()
+        assert self.resized(qapp, v, 1600, 1000) == pytest.approx(1.0)
+        assert v.fit_mode  # bleibt im Einpass-Modus, auch wenn 100 % die Grenze ist
+        v.close()
