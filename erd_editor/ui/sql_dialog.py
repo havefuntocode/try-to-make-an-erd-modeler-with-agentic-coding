@@ -45,13 +45,9 @@ class SqlExportDialog(QDialog):
             self.databases.addItem(item)
         self.databases.itemChanged.connect(self.refresh)
 
-        self.create_database = QCheckBox("Datenbank/Schema anlegen (CREATE DATABASE / SCHEMA)")
-        self.create_database.setChecked(True)
-        self.drop_existing = QCheckBox("Vorhandene Tabellen vorher löschen (DROP TABLE)")
         self.comments = QCheckBox("Kommentare übernehmen")
         self.comments.setChecked(True)
-        for box in (self.create_database, self.drop_existing, self.comments):
-            box.toggled.connect(self.refresh)
+        self.comments.toggled.connect(self.refresh)
 
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
@@ -70,9 +66,11 @@ class SqlExportDialog(QDialog):
         left = QVBoxLayout()
         left.addWidget(QLabel("Datenbanken:"))
         left.addWidget(self.databases, 1)
-        left.addWidget(self.create_database)
-        left.addWidget(self.drop_existing)
         left.addWidget(self.comments)
+        safety = QLabel("Das Skript legt jede Datenbank <b>neu</b> an. Gibt es sie schon, bricht es ab – "
+                        "bestehende Datenbanken werden nie verändert, es enthält kein DROP.")
+        safety.setWordWrap(True)
+        left.addWidget(safety)
         hint = QLabel("Fremdschlüssel stehen am Ende des Skripts – die Reihenfolge der Tabellen spielt keine Rolle.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#6B7280")
@@ -103,7 +101,7 @@ class SqlExportDialog(QDialog):
         ]
 
     def options(self) -> DdlOptions:
-        return DdlOptions(self.create_database.isChecked(), self.drop_existing.isChecked(), self.comments.isChecked())
+        return DdlOptions(comments=self.comments.isChecked())
 
     def script(self) -> str:
         names = self.selected()

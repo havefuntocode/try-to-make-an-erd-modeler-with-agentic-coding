@@ -39,9 +39,11 @@ entirely through *agentic coding* with Claude Code.
 **Export**
 - Print with preview, PDF, PNG and SVG
 - SQL script (`CREATE TABLE`, foreign keys, `CREATE VIEW` in dependency order) for MySQL,
-  PostgreSQL and SQL Server – round-trip tested against real servers
+  MariaDB, PostgreSQL and SQL Server – round-trip tested against real servers
 
 **Safe by design**
+- Never changes an existing database: the adapters only read, and generated SQL scripts only
+  create a *new* database – they contain no `DROP` and abort if the database already exists
 - Passwords are never stored in diagram files; they go to the Windows Credential Manager via
   `keyring`
 

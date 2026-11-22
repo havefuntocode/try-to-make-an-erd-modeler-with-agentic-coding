@@ -213,16 +213,17 @@ def test_ddl_views_after_tables_in_dependency_order(diagram):
     assert not any("CREATE TABLE `v_" in s for s in stmts)
 
 
-@pytest.mark.parametrize("dialect", [Dialect.MYSQL, Dialect.POSTGRESQL, Dialect.MSSQL])
-def test_ddl_drop_views_first_in_reverse_order(diagram, dialect):
-    from erd_editor.export.ddl import DdlOptions, generate_statements
+@pytest.mark.parametrize("dialect", list(Dialect))
+def test_ddl_never_drops_views(diagram, dialect):
+    """Kein DROP mehr (Sicherheitsregel); Views kommen nach den Tabellen."""
+    from erd_editor.export.ddl import generate_statements
 
     db = diagram.databases[0]
     db.dialect = dialect
-    stmts = generate_statements(db, DdlOptions(drop_existing=True))
-    drops = [s for s in stmts if s.startswith("DROP VIEW")]
-    assert "v_alles" in drops[0] and "v_kunde" in drops[1]
-    assert stmts.index(drops[-1]) < min(i for i, s in enumerate(stmts) if s.startswith("DROP TABLE"))
+    stmts = generate_statements(db)
+    assert not any("DROP " in s.upper() for s in stmts)
+    views = [i for i, s in enumerate(stmts) if s.startswith("CREATE VIEW")]
+    assert views and min(views) > max(i for i, s in enumerate(stmts) if s.startswith("CREATE TABLE"))
 
 
 def test_ddl_view_comments_and_missing_text():

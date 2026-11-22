@@ -1,4 +1,14 @@
-"""SQL-Export: `CREATE`-Skripte für MySQL, PostgreSQL und SQL Server.
+"""SQL-Export: `CREATE`-Skripte für MySQL, MariaDB, PostgreSQL und SQL Server.
+
+Sicherheit: Ein Skript legt immer eine **neue** Datenbank an und verändert nie
+eine bestehende. Es enthält kein `DROP` und bricht ab, wenn es die Datenbank
+schon gibt (Regel in PROJEKT.md, Abschnitt 13):
+- MySQL/MariaDB: `CREATE DATABASE` ohne `IF NOT EXISTS` – Fehler, wenn vorhanden.
+- SQL Server: Prüfung vorab; ist die Datenbank da, `RAISERROR` und `SET NOEXEC ON`,
+  damit auch die folgenden Abschnitte (nach `GO`) nicht ausgeführt werden.
+- PostgreSQL: Die Datenbank wird vorher von Hand angelegt und verbunden (eine
+  Verbindung gilt für genau eine Datenbank). Das Skript läuft in einer Transaktion
+  und bricht ab, wenn die verbundene Datenbank anders heißt oder nicht leer ist.
 
 Datentypen sind nativ gespeichert und werden unverändert übernommen.
 Fremdschlüssel kommen nach den Tabellen als `ALTER TABLE … ADD CONSTRAINT`,
@@ -21,8 +31,7 @@ from erd_editor.model import Column, Database, Diagram, Dialect, ForeignKey, Ind
 
 @dataclass(frozen=True)
 class DdlOptions:
-    create_database: bool = True  # CREATE DATABASE / CREATE SCHEMA
-    drop_existing: bool = False  # vorhandene Tabellen vorher löschen
+    # Bewusst keine Optionen für DROP oder „in bestehende Datenbank schreiben“
     comments: bool = True  # Tabellen- und Spaltenkommentare
 
 
@@ -153,16 +162,11 @@ def _create_views(database: Database, full, comment) -> list[str]:
 def _mysql(db: Database, o: DdlOptions) -> list[str]:
     q = lambda n: quote(Dialect.MYSQL, n)  # noqa: E731
     out: list[str] = []
-    if o.create_database:
-        charset = f" CHARACTER SET {db.charset}" if db.charset else ""
-        collate = f" COLLATE {db.collation}" if db.collation else ""
-        out.append(f"CREATE DATABASE IF NOT EXISTS {q(db.name)}{charset}{collate}")
+    charset = f" CHARACTER SET {db.charset}" if db.charset else ""
+    collate = f" COLLATE {db.collation}" if db.collation else ""
+    # ohne IF NOT EXISTS: gibt es die Datenbank schon, bricht das Skript hier ab
+    out.append(f"CREATE DATABASE {q(db.name)}{charset}{collate}")
     out.append(f"USE {q(db.name)}")
-    if o.drop_existing:
-        out += [f"DROP VIEW IF EXISTS {q(v.name)}" for _, v in reversed(_views(db))]
-        out.append("SET FOREIGN_KEY_CHECKS = 0")
-        out += [f"DROP TABLE IF EXISTS {q(t.name)}" for _, t in _tables(db)]
-        out.append("SET FOREIGN_KEY_CHECKS = 1")
     for _, table in _tables(db):
         lines = [_mysql_column(c, o) for c in table.columns]
         for index in _ordered_indexes(table):
@@ -215,11 +219,11 @@ def _postgres(db: Database, o: DdlOptions) -> list[str]:
     def full(schema: str | None, table: str) -> str:
         return f"{q(schema)}.{q(table)}" if schema else q(table)
 
-    if o.create_database:
-        out += [f"CREATE SCHEMA IF NOT EXISTS {q(s.name)}" for s in db.schemas if s.name and s.name != "public"]
-    if o.drop_existing:
-        out += [f"DROP VIEW IF EXISTS {full(s, v.name)} CASCADE" for s, v in reversed(_views(db))]
-        out += [f"DROP TABLE IF EXISTS {full(s, t.name)} CASCADE" for s, t in _tables(db)]
+    # Eine Transaktion: nach einem Fehler (auch aus der Prüfung) wird nichts übernommen,
+    # selbst wenn der Client weitermacht (psql ohne ON_ERROR_STOP)
+    out.append("BEGIN")
+    out.append(_pg_guard(db.name))
+    out += [f"CREATE SCHEMA {q(s.name)}" for s in db.schemas if s.name and s.name != "public"]
     for schema, table in _tables(db):
         registry = names.setdefault(schema, _Names())
         lines = []
@@ -265,7 +269,28 @@ def _postgres(db: Database, o: DdlOptions) -> list[str]:
         return []
 
     out += _create_views(db, full, view_comment)
+    out.append("COMMIT")
     return out
+
+
+def _pg_guard(name: str) -> str:
+    """Abbruch, wenn die verbundene Datenbank nicht `name` ist oder schon Objekte enthält."""
+    d = Dialect.POSTGRESQL
+    return (
+        "DO $$\n"
+        "BEGIN\n"
+        f"  IF current_database() <> {literal(name, d)} THEN\n"
+        f"    RAISE EXCEPTION 'Skript für Datenbank %, verbunden mit % – abgebrochen', {literal(name, d)}, current_database();\n"
+        "  END IF;\n"
+        "  IF EXISTS (SELECT 1 FROM pg_catalog.pg_class c\n"
+        "             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace\n"
+        "             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')\n"
+        "               AND n.nspname NOT LIKE 'pg\\_%'\n"
+        "               AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')) THEN\n"
+        f"    RAISE EXCEPTION 'Datenbank % ist nicht leer – abgebrochen', {literal(name, d)};\n"
+        "  END IF;\n"
+        "END $$"
+    )
 
 
 def _pg_name(name: str, table: str, suffix: str) -> str:
@@ -285,21 +310,16 @@ def _mssql(db: Database, o: DdlOptions) -> list[str]:
     def full(schema: str | None, table: str) -> str:
         return f"{q(schema or 'dbo')}.{q(table)}"
 
-    if o.create_database:
-        out.append(f"IF DB_ID({literal(db.name, d)}) IS NULL CREATE DATABASE {q(db.name)}")
+    # Gibt es die Datenbank schon: Fehlermeldung und alle weiteren Abschnitte nur noch
+    # übersetzen, nicht ausführen (NOEXEC wirkt über GO hinweg bis SET NOEXEC OFF)
+    message = literal(f"Datenbank {db.name} gibt es schon – Skript abgebrochen, nichts geändert.", d)
+    out.append(f"IF DB_ID({literal(db.name, d)}) IS NOT NULL\nBEGIN\n"
+               f"  RAISERROR({message.replace('%', '%%')}, 16, 1);\n  SET NOEXEC ON;\nEND")
+    out.append(f"CREATE DATABASE {q(db.name)}")
     out.append(f"USE {q(db.name)}")
-    if o.create_database:
-        for s in db.schemas:
-            if s.name and s.name != "dbo":
-                out.append(f"IF SCHEMA_ID({literal(s.name, d)}) IS NULL EXEC({literal('CREATE SCHEMA ' + q(s.name), d)})")
-    if o.drop_existing:
-        for s, t in _tables(db):
-            for fk in t.foreign_keys:
-                object_name = literal(q(s or "dbo") + "." + q(fk.name), d)
-                out.append(f"IF OBJECT_ID({object_name}, N'F') IS NOT NULL "
-                           f"ALTER TABLE {full(s, t.name)} DROP CONSTRAINT {q(fk.name)}")
-        out += [f"DROP VIEW IF EXISTS {full(s, v.name)}" for s, v in reversed(_views(db))]
-        out += [f"DROP TABLE IF EXISTS {full(s, t.name)}" for s, t in _tables(db)]
+    for s in db.schemas:
+        if s.name and s.name != "dbo":
+            out.append(f"EXEC({literal('CREATE SCHEMA ' + q(s.name), d)})")
     for schema, table in _tables(db):
         registry = names.setdefault(schema, _Names())
         lines = []
@@ -372,6 +392,16 @@ def _rules(fk: ForeignKey) -> str:
 
 DIALECT_NAMES = {d: d.label for d in Dialect}
 
+SCRIPT_HINTS = {
+    Dialect.MYSQL: "Legt die Datenbank neu an; gibt es sie schon, bricht das Skript beim\n"
+                   "-- CREATE DATABASE ab. Nicht mit --force (\"Fehler ignorieren\") ausführen.",
+    Dialect.POSTGRESQL: "Läuft in einer Transaktion und bricht ab, wenn die verbundene Datenbank\n"
+                        "-- anders heißt oder nicht leer ist – dann wird nichts übernommen.",
+    Dialect.MSSQL: "Legt die Datenbank neu an; gibt es sie schon, meldet das Skript einen Fehler\n"
+                   "-- und führt nichts weiter aus (SET NOEXEC ON).",
+}
+SCRIPT_HINTS[Dialect.MARIADB] = SCRIPT_HINTS[Dialect.MYSQL]
+
 
 def generate_script(diagram: Diagram, databases: list[str] | None = None, options: DdlOptions = DdlOptions()) -> str:
     """Lesbares Skript für die gewählten Datenbanken (Standard: alle)."""
@@ -382,11 +412,15 @@ def generate_script(diagram: Diagram, databases: list[str] | None = None, option
         views = len(_views(db))
         count = f"{tables} Tabellen" + (f", {views} View{'' if views == 1 else 's'}" if views else "")
         parts.append(f"\n-- ===== {db.name} ({DIALECT_NAMES[db.dialect]}, {count}) =====\n")
-        if db.dialect is Dialect.POSTGRESQL and options.create_database:
-            parts.append(f"-- Datenbank vorher anlegen und verbinden:\n--   CREATE DATABASE {quote(db.dialect, db.name)};\n"
+        parts.append(f"-- {SCRIPT_HINTS[db.dialect]}\n")
+        if db.dialect is Dialect.POSTGRESQL:
+            parts.append(f"-- Datenbank vorher anlegen und verbinden (z. B. in psql):\n"
+                         f"--   CREATE DATABASE {quote(db.dialect, db.name)};\n"
                          f"--   \\connect {db.name}\n")
         separator = "\nGO\n\n" if db.dialect is Dialect.MSSQL else ";\n\n"
         statements = generate_statements(db, options)
+        if db.dialect is Dialect.MSSQL:
+            statements.append("SET NOEXEC OFF")  # nur im Skript: nächste Datenbank wieder ausführen
         body = separator.join(s for s in statements)
         parts.append(body + (";\n" if db.dialect is not Dialect.MSSQL else "\nGO\n"))
     return "\n".join(parts)

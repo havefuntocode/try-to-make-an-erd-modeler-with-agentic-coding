@@ -154,6 +154,34 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - PDF-Export
 - Später: PNG und SVG (für Artikel und Bücher)
 
+### SQL-Skript (`CREATE …`) – nur neue Datenbanken
+
+Das Programm führt SQL nie selbst aus; es erzeugt ein Skript (Vorschau, Zwischenablage,
+Datei). Auch das Skript ist so gebaut, dass es **keine bestehende Datenbank verändern**
+kann (Sicherheitsregel, Abschnitt 13):
+
+- Kein `DROP` – die frühere Option „Vorhandene Tabellen vorher löschen“ ist entfernt.
+- Kein „falls nicht vorhanden, weiter“ (`IF NOT EXISTS`) – die frühere Option
+  „Datenbank/Schema anlegen“ ist ebenfalls entfernt, das Skript legt **immer** neu an.
+  Einzige Option: Kommentare übernehmen.
+- Kopf jedes Abschnitts erklärt, wie das Skript abbricht.
+
+| Dialekt | Ablauf | Gibt es die Datenbank schon … |
+|---|---|---|
+| MySQL, MariaDB | `CREATE DATABASE x` (ohne `IF NOT EXISTS`), `USE x`, Tabellen, FKs, Views | Fehler beim `CREATE DATABASE`; der Client stoppt (mysql-Client, Workbench im Standard) |
+| SQL Server | Prüfung `IF DB_ID(N'x') IS NOT NULL` → `RAISERROR` + `SET NOEXEC ON`; dann `CREATE DATABASE`, `USE`, … ; am Ende `SET NOEXEC OFF` | Fehlermeldung; alle folgenden Abschnitte werden nur noch übersetzt, nicht ausgeführt – auch über `GO` hinweg und wenn der Client weitermacht (SSMS) |
+| PostgreSQL | Datenbank vorher von Hand anlegen und verbinden (Hinweis im Kopf); Skript in `BEGIN … COMMIT`, zuerst eine `DO`-Prüfung | Abbruch, wenn die verbundene Datenbank anders heißt oder schon Tabellen, Views oder Sequenzen enthält; die Transaktion verwirft dann alles, auch wenn psql ohne `ON_ERROR_STOP` weitermacht |
+
+Bekannte Grenze: MySQL/MariaDB kennen in einem einfachen Skript keinen bedingten
+Abbruch. Führt man es mit „Fehler ignorieren“ aus (`mysql --force`), läuft es nach dem
+gescheiterten `CREATE DATABASE` weiter und legt seine Tabellen in der vorhandenen
+Datenbank **zusätzlich** an. Gelöscht oder geändert wird auch dann nichts (kein `DROP`,
+kein `ALTER` an vorhandenen Tabellen; gleichnamige Tabellen scheitern am `CREATE TABLE`).
+Der Kopf des Skripts warnt davor.
+
+Mehrere PostgreSQL-Datenbanken in einem Skript: jeder Abschnitt braucht seine eigene
+Verbindung; ein Abschnitt in der falschen Datenbank bricht durch die Prüfung ab.
+
 ## 10. Umfang
 
 ### Version 1
@@ -233,7 +261,14 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       ausgegraut, wenn nicht möglich; Rechtsklick: nur Symbole / mit Text (gespeichert)
 - [ ] ~~Modell mit Datenbank abgleichen (Unterschiede als `ALTER TABLE`)~~ – entfällt:
       bestehende Datenbanken werden nie verändert (siehe Abschnitt 13). Stattdessen
-      ggf. ein neu modelliertes Modell als **neue** Datenbank anlegen (Ausgestaltung offen)
+      ein neu modelliertes Modell als **neue** Datenbank anlegen:
+  - [x] Variante 1 (2026-11-22): SQL-Skript, das nur neu anlegt und sonst abbricht
+        (Abschnitt 9, „SQL-Skript – nur neue Datenbanken“): DROP-Option und
+        `IF NOT EXISTS` entfernt, Prüfungen je Dialekt, Hinweise im Skript und im Dialog,
+        Tests `tests/test_ddl_safety.py` (auch live gegen alle vier Server)
+  - [ ] Variante 2 (offen, noch nicht entschieden): Programm legt die neue Datenbank
+        selbst an – nur für modellierte Datenbanken, nur wenn der Name auf dem Server
+        frei ist, nie `DROP`. Wäre der erste Schreibzugriff des Programms
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
 - [ ] n:m-Zwischentabellen optional als eine Linie
@@ -273,6 +308,11 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
   Anzeigenamen über `dialect.label`. Dicts je Dialekt (`COMMON_TYPES`, `ID_TYPES`,
   `DEFAULT_SCHEMAS`, `INDEX_KINDS`, `DEFAULT_USERS`) brauchen einen MariaDB-Eintrag
 - Dialekt-Auswahl in Tests über `findData(Dialect.X.value)`, nicht über die Listenposition
+- SQL-Export (`export/ddl.py`): `generate_statements()` liefert die Anweisungen inkl. der
+  Prüfungen (SQL Server: `IF DB_ID … SET NOEXEC ON`, PostgreSQL: `BEGIN`, `DO $$ … $$`,
+  `COMMIT`); `generate_script()` ergänzt Kopf, Hinweise (`SCRIPT_HINTS`) und bei SQL Server
+  das abschließende `SET NOEXEC OFF`. Die Live-Tests in `tests/test_ddl_safety.py` legen
+  eine Wegwerf-Datenbank `erd_test_safety` an und räumen sie wieder ab
 - Die Anwendung selbst speichert Passwörter unter dem Dienst `erd-editor`
 - Tests, die ein echtes Menü oder einen Dialog öffnen würden, nicht mit `exec()` schreiben,
   sondern das Menü bauen und Aktionen direkt auslösen (sonst hängt der Testlauf)
@@ -325,7 +365,12 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Lizenz: MIT (entschieden, `LICENSE`)
 - Sicherheit (entschieden, 2026-11-22): Das Programm verändert **niemals** eine bestehende
   Datenbank – kein `ALTER`, `DROP`, `INSERT` o. Ä. gegen vorhandene Datenbanken, auch nicht
-  auf Wunsch. Adapter lesen nur. Schreiben kommt höchstens für ein neu modelliertes Modell
-  in eine **neu angelegte** Datenbank in Frage
+  auf Wunsch. Adapter lesen nur (geprüft 2026-11-22: alle `execute`-Aufrufe sind die
+  `SELECT`-Abfragen der Adapter). Schreiben kommt höchstens für ein neu modelliertes Modell
+  in eine **neu angelegte** Datenbank in Frage. Das gilt auch für erzeugte SQL-Skripte:
+  kein `DROP`, Abbruch bei vorhandener Datenbank (Abschnitt 9)
+  - Für die Entwicklung: keine Option, keinen Schalter und keine Anweisung einbauen, die
+    das umgeht (`DROP`, `IF NOT EXISTS` beim Anlegen, `ALTER` an vorhandenen Tabellen,
+    Skript ohne `CREATE DATABASE`); `tests/test_ddl_safety.py` sichert das ab
 - Repository: privat auf GitHub, `havefuntocode/try-to-make-an-erd-modeler-with-agentic-coding`
   (Remote `origin`, Branch `main`); Commits nur mit der Repo-eigenen Git-Identität
