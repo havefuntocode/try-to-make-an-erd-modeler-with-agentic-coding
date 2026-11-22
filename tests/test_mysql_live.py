@@ -49,7 +49,7 @@ class LiveServer:
             return None
 
     def profile(self) -> ConnectionProfile:
-        return ConnectionProfile("test", Dialect.MYSQL, host=HOST, port=self.port, user=USER)
+        return ConnectionProfile("test", Dialect(self.id), host=HOST, port=self.port, user=USER)
 
 
 SERVERS = [
@@ -87,6 +87,8 @@ def test_database_meta(live):
     assert shop.charset == "utf8mb4"
     assert shop.server_version
     assert shop.connection_profile == "test"
+    # Dialekt folgt der Serverversion (MariaDB meldet z. B. „11.4.2-MariaDB“)
+    assert shop.dialect is (Dialect.MARIADB if "mariadb" in shop.server_version.lower() else Dialect.MYSQL)
 
 
 def test_same_tables_and_columns(live, expected):

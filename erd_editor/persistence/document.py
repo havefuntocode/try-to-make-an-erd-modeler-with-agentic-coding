@@ -174,10 +174,18 @@ def _database_to_dict(db: Database) -> dict[str, Any]:
     }
 
 
+def _database_dialect(d: dict[str, Any]) -> Dialect:
+    """Dialekt aus der Datei; ältere Dateien führen MariaDB-Datenbanken noch als MySQL."""
+    dialect = Dialect(d["dialect"])
+    if dialect is Dialect.MYSQL and "mariadb" in (d.get("server_version") or "").lower():
+        return Dialect.MARIADB
+    return dialect
+
+
 def _database_from_dict(d: dict[str, Any]) -> Database:
     return Database(
         name=d["name"],
-        dialect=Dialect(d["dialect"]),
+        dialect=_database_dialect(d),
         schemas=[Schema(s.get("name"), [_table_from_dict(t) for t in s.get("tables", [])]) for s in d.get("schemas", [])],
         connection_profile=d.get("connection"),
         server_version=d.get("server_version"),

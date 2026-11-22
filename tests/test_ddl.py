@@ -11,6 +11,7 @@ from erd_editor.analysis import derive_relationships
 from erd_editor.export.ddl import DdlOptions, generate_script, generate_statements, literal, quote, sql_default
 from erd_editor.model import Column, Database, Diagram, Dialect, Schema, Table, TableRef
 from erd_editor.model.editing import add_database, add_relationship, add_table
+from erd_editor.model.types import ID_TYPES
 
 # ---------------------------------------------------------------- Einzelheiten
 
@@ -71,12 +72,12 @@ def test_on_delete_rules(test_schema):
 
 
 def _modeled(dialect):
-    d = add_database(Diagram(), "lager", dialect, "lager" if dialect is not Dialect.MYSQL else None)
-    schema = None if dialect is Dialect.MYSQL else "lager"
+    d = add_database(Diagram(), "lager", dialect, None if dialect.mysql_family else "lager")
+    schema = None if dialect.mysql_family else "lager"
     ref = lambda t: TableRef("lager", schema, t)  # noqa: E731
     from erd_editor.model import Index, IndexKind
 
-    id_type = {Dialect.MYSQL: "int", Dialect.POSTGRESQL: "integer", Dialect.MSSQL: "int"}[dialect]
+    id_type = ID_TYPES[dialect]
     for name in ("regal", "fach"):
         d = add_table(d, ref(name), Table(name, [Column("id", id_type, False, auto_increment=True)],
                                           [Index("PRIMARY", IndexKind.PRIMARY, ("id",))]))
@@ -94,8 +95,8 @@ def test_modeled_database_per_dialect(dialect):
         assert 'CREATE SCHEMA IF NOT EXISTS "lager"' in script
     if dialect is Dialect.MSSQL:
         assert "IDENTITY(1,1)" in script and "\nGO\n" in script
-    if dialect is Dialect.MYSQL:
-        assert "AUTO_INCREMENT" in script
+    if dialect.mysql_family:
+        assert "AUTO_INCREMENT" in script and "`fach`" in script
 
 
 def test_unsupported_index_becomes_comment():
@@ -154,7 +155,7 @@ def keyring_password(user):
         return None
 
 
-def _mysql_family_roundtrip(account: str, port: int):
+def _mysql_family_roundtrip(account: str, port: int, dialect: Dialect = Dialect.MYSQL):
     """Roundtrip für MySQL und MariaDB (gleicher Adapter, anderer Port/keyring-Eintrag)."""
     import pymysql
 
@@ -165,7 +166,7 @@ def _mysql_family_roundtrip(account: str, port: int):
     pw = keyring_password(account)
     if pw is None:
         pytest.skip(f"kein Passwort für {account}")
-    profile = ConnectionProfile("t", Dialect.MYSQL, "localhost", port, "root")
+    profile = ConnectionProfile("t", dialect, "localhost", port, "root")
     try:
         with MySqlAdapter(profile, pw) as a:
             if "erd_test_shop" not in a.list_databases():
@@ -193,7 +194,7 @@ def _mysql_roundtrip():
 
 
 def _mariadb_roundtrip():
-    return _mysql_family_roundtrip("root@mariadb", 3307)
+    return _mysql_family_roundtrip("root@mariadb", 3307, Dialect.MARIADB)
 
 
 def _postgres_roundtrip():

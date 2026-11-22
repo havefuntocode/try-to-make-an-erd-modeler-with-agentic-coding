@@ -35,16 +35,17 @@ AdapterFactory = Callable[[ConnectionProfile, str | None], SchemaAdapter]
 
 DIALECTS = [
     (Dialect.MYSQL, "MySQL", 3306, True),
+    (Dialect.MARIADB, "MariaDB", 3306, True),
     (Dialect.POSTGRESQL, "PostgreSQL", 5432, True),
     (Dialect.MSSQL, "SQL Server", 1433, True),
 ]
 
 
-DEFAULT_USERS = {Dialect.MYSQL: "root", Dialect.POSTGRESQL: "postgres", Dialect.MSSQL: "sa"}
+DEFAULT_USERS = {Dialect.MYSQL: "root", Dialect.MARIADB: "root", Dialect.POSTGRESQL: "postgres", Dialect.MSSQL: "sa"}
 
 
 def default_adapter_factory(profile: ConnectionProfile, password: str | None) -> SchemaAdapter:
-    if profile.dialect is Dialect.MYSQL:
+    if profile.dialect.mysql_family:
         return MySqlAdapter(profile, password)
     if profile.dialect is Dialect.POSTGRESQL:
         return PostgresAdapter(profile, password)

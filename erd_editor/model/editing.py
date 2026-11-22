@@ -51,7 +51,7 @@ def add_database(diagram: Diagram, name: str, dialect: Dialect, schema: str | No
         raise EditError("Bitte einen Namen für die Datenbank angeben")
     if diagram.database(name) is not None:
         raise EditError(f"Eine Datenbank {name!r} gibt es schon")
-    schema_name = None if dialect is Dialect.MYSQL else (schema or DEFAULT_SCHEMAS[dialect])
+    schema_name = None if dialect.mysql_family else (schema or DEFAULT_SCHEMAS[dialect])
     new = _clone(diagram)
     new.databases.append(Database(name, dialect, [Schema(schema_name, [])], modeled=True))
     return new
@@ -277,7 +277,7 @@ def add_relationship(
     if identifying:
         pk = table.primary_key
         if pk is None:
-            pk_name = "PRIMARY" if new.database(child.database).dialect is Dialect.MYSQL else f"{child.table}_pkey"
+            pk_name = "PRIMARY" if new.database(child.database).dialect.mysql_family else f"{child.table}_pkey"
             table.indexes.insert(0, Index(pk_name, IndexKind.PRIMARY, new_cols))
         else:
             table.indexes[table.indexes.index(pk)] = replace(pk, columns=pk.columns + new_cols)

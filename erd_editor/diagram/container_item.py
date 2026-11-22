@@ -32,8 +32,6 @@ from erd_editor.model import Database
 if TYPE_CHECKING:
     from erd_editor.diagram.entity_item import EntityItem
 
-DIALECT_NAMES = {"mysql": "MySQL", "postgresql": "PostgreSQL", "mssql": "SQL Server"}
-
 
 class Edge(Flag):
     """Angefasste Kante(n) beim Aufziehen."""
@@ -107,8 +105,8 @@ class ContainerItem(QGraphicsObject):
         """Zweite Kopfzeile: Dialekt/Version, Zeichensatz/Kollation."""
         db = self.database
         if db.modeled:
-            return f"Modell · {DIALECT_NAMES.get(db.dialect.value, db.dialect.value)}"
-        parts = [" ".join(p for p in (DIALECT_NAMES.get(db.dialect.value, db.dialect.value), db.server_version) if p)]
+            return f"Modell · {db.dialect.label}"
+        parts = [" ".join(p for p in (db.dialect.label, db.server_version) if p)]
         if db.charset or db.collation:
             parts.append(" / ".join(p for p in (db.charset, db.collation) if p))
         return " · ".join(parts)

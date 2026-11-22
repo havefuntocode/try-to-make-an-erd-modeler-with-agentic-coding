@@ -39,7 +39,6 @@ from erd_editor.ui.relationship_dialog import RelationshipDialog
 from erd_editor.ui.table_dialog import TableDialog
 from erd_editor.ui.view_dialog import ViewDialog
 
-DIALECT_LABELS = {Dialect.MYSQL: "MySQL", Dialect.POSTGRESQL: "PostgreSQL", Dialect.MSSQL: "SQL Server"}
 READ_ONLY_HINT = (
     "Die Datenbank „{name}“ wurde aus einer Datenbank eingelesen "
     "und kann nicht verändert werden."
@@ -56,8 +55,8 @@ class DatabaseDialog(QDialog):
         self.name = QLineEdit()
         self.name.setPlaceholderText("z. B. shop")
         self.dialect = QComboBox()
-        for dialect, label in DIALECT_LABELS.items():
-            self.dialect.addItem(label, dialect.value)
+        for dialect in Dialect:
+            self.dialect.addItem(dialect.label, dialect.value)
         self.schema = QLineEdit()
         self.message = QLabel()
         self.message.setStyleSheet("color:#B42318")

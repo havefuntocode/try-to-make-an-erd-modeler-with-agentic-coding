@@ -31,7 +31,7 @@ class DdlOptions:
 
 def quote(dialect: Dialect, name: str) -> str:
     """Bezeichner in der Schreibweise des Dialekts quoten."""
-    if dialect is Dialect.MYSQL:
+    if dialect.mysql_family:
         return "`" + name.replace("`", "``") + "`"
     if dialect is Dialect.MSSQL:
         return "[" + name.replace("]", "]]") + "]"
@@ -90,7 +90,8 @@ class _Names:
 
 def generate_statements(database: Database, options: DdlOptions = DdlOptions()) -> list[str]:
     """Alle Anweisungen für eine Datenbank (ohne Trenner)."""
-    builder = {Dialect.MYSQL: _mysql, Dialect.POSTGRESQL: _postgres, Dialect.MSSQL: _mssql}[database.dialect]
+    builder = {Dialect.MYSQL: _mysql, Dialect.MARIADB: _mysql, Dialect.POSTGRESQL: _postgres,
+               Dialect.MSSQL: _mssql}[database.dialect]
     return builder(database, options)
 
 
@@ -146,7 +147,7 @@ def _create_views(database: Database, full, comment) -> list[str]:
     return out
 
 
-# ---------------------------------------------------------------------- MySQL
+# ---------------------------------------------------------------------- MySQL (und MariaDB)
 
 
 def _mysql(db: Database, o: DdlOptions) -> list[str]:
@@ -369,7 +370,7 @@ def _rules(fk: ForeignKey) -> str:
     return "".join(parts)
 
 
-DIALECT_NAMES = {Dialect.MYSQL: "MySQL", Dialect.POSTGRESQL: "PostgreSQL", Dialect.MSSQL: "SQL Server"}
+DIALECT_NAMES = {d: d.label for d in Dialect}
 
 
 def generate_script(diagram: Diagram, databases: list[str] | None = None, options: DdlOptions = DdlOptions()) -> str:

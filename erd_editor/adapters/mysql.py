@@ -8,8 +8,10 @@ Aufbau:
 Alle Abfragen vergeben eigene Spaltenaliase in Kleinbuchstaben, weil MySQL 8
 die Spaltennamen von `information_schema` sonst teils groß zurückgibt.
 
-MariaDB wird über denselben Adapter gelesen. Zwei Abweichungen werden an
-MySQL 8 angeglichen (`mariadb=True`):
+MariaDB wird über denselben Adapter gelesen (Profil-Dialekt MySQL oder
+MariaDB). Welcher Dialekt die eingelesene Datenbank bekommt, entscheidet die
+Serverversion, nicht das Profil. Zwei Abweichungen werden an MySQL 8
+angeglichen (`mariadb=True`):
 - Ganzzahltypen tragen eine Anzeigebreite (`int(11)`), MySQL 8 nicht (`int`).
 - `COLUMN_DEFAULT` liefert Literale gequotet (`'abc'`, `NULL` als Text),
   MySQL den nackten Wert bzw. SQL-NULL.
@@ -313,7 +315,7 @@ def build_database(
 
     return Database(
         name=name,
-        dialect=Dialect.MYSQL,
+        dialect=Dialect.MARIADB if mariadb else Dialect.MYSQL,
         schemas=[Schema(None, list(by_name.values()))],
         connection_profile=connection_profile,
         server_version=server_version,
@@ -323,9 +325,10 @@ def build_database(
 
 
 class MySqlAdapter(SchemaAdapter):
-    """Liest Datenbanken eines MySQL-Servers."""
+    """Liest Datenbanken eines MySQL- oder MariaDB-Servers."""
 
     dialect = Dialect.MYSQL
+    dialects = (Dialect.MYSQL, Dialect.MARIADB)
     DEFAULT_PORT = 3306
 
     def __init__(self, profile: ConnectionProfile, password: str | None = None) -> None:

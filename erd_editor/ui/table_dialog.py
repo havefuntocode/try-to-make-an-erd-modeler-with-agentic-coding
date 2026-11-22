@@ -37,6 +37,7 @@ IDX_HEADERS = ["Name", "Art", "Spalten"]
 # Indexarten, die der Editor je Dialekt anbietet (PK läuft über die Spalte „PK“)
 INDEX_KINDS = {
     Dialect.MYSQL: [IndexKind.UNIQUE, IndexKind.INDEX, IndexKind.FULLTEXT, IndexKind.SPATIAL],
+    Dialect.MARIADB: [IndexKind.UNIQUE, IndexKind.INDEX, IndexKind.FULLTEXT, IndexKind.SPATIAL],
     Dialect.POSTGRESQL: [IndexKind.UNIQUE, IndexKind.INDEX],
     Dialect.MSSQL: [IndexKind.UNIQUE, IndexKind.INDEX],
 }
@@ -277,7 +278,7 @@ class TableDialog(QDialog):
         old_pk = self._original.primary_key if self._original else None
         if old_pk:
             return old_pk.name
-        return "PRIMARY" if self.dialect is Dialect.MYSQL else f"{self.name.text().strip()}_pkey"
+        return "PRIMARY" if self.dialect.mysql_family else f"{self.name.text().strip()}_pkey"
 
     def add_index(self, name: str | None = None, kind: IndexKind = IndexKind.INDEX, keys: list[int] | None = None) -> int:
         """Indexzeile anfügen; ohne Angaben mit Vorschlagsnamen und der markierten Spalte."""

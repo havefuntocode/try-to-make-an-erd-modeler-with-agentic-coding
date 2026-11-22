@@ -105,13 +105,13 @@ class TestDialog:
     def test_dialects_enabled(self, qapp):
         d = ConnectionDialog()
         model = d.dialect.model()
-        assert all(model.item(i).isEnabled() for i in range(3))  # MySQL, PostgreSQL, SQL Server
+        assert all(model.item(i).isEnabled() for i in range(4))  # MySQL, MariaDB, PostgreSQL, SQL Server
 
     def test_windows_auth_only_for_sql_server(self, qapp):
         d = ConnectionDialog()
         d.show()
         assert d.windows_auth.isHidden()
-        d.dialect.setCurrentIndex(2)
+        d.dialect.setCurrentIndex(d.dialect.findData(Dialect.MSSQL.value))
         assert not d.windows_auth.isHidden() and d.windows_auth.isChecked()
         assert not d.user.isEnabled() and not d.password.isEnabled()
         p = d.profile()
@@ -121,7 +121,7 @@ class TestDialog:
 
     def test_sql_login(self, qapp):
         d = ConnectionDialog()
-        d.dialect.setCurrentIndex(2)
+        d.dialect.setCurrentIndex(d.dialect.findData(Dialect.MSSQL.value))
         d.windows_auth.setChecked(False)
         assert d.user.isEnabled() and d.password.isEnabled()
         assert d.user.text() == "sa"
@@ -144,7 +144,7 @@ class TestDialog:
     def test_live_sql_server_windows_auth(self, qapp):
         """Echter SQL Server per Windows-Anmeldung (übersprungen, wenn nicht erreichbar)."""
         d = ConnectionDialog()
-        d.dialect.setCurrentIndex(2)
+        d.dialect.setCurrentIndex(d.dialect.findData(Dialect.MSSQL.value))
         if not d.connect_to_server():
             pytest.skip(f"SQL Server nicht erreichbar: {d.status.text()}")
         names = [d.database_list.item(i).text() for i in range(d.database_list.count())]
@@ -152,17 +152,17 @@ class TestDialog:
 
     def test_dialect_switch_sets_defaults(self, qapp):
         d = ConnectionDialog()
-        d.dialect.setCurrentIndex(1)
+        d.dialect.setCurrentIndex(d.dialect.findData(Dialect.POSTGRESQL.value))
         assert (d.port.value(), d.user.text()) == (5432, "postgres")
         assert d.profile().dialect is Dialect.POSTGRESQL
-        d.dialect.setCurrentIndex(0)
+        d.dialect.setCurrentIndex(d.dialect.findData(Dialect.MYSQL.value))
         assert (d.port.value(), d.user.text()) == (3306, "root")
 
     def test_dialect_switch_keeps_own_values(self, qapp):
         d = ConnectionDialog()
         d.port.setValue(6000)
         d.user.setText("ich")
-        d.dialect.setCurrentIndex(1)
+        d.dialect.setCurrentIndex(d.dialect.findData(Dialect.POSTGRESQL.value))
         assert (d.port.value(), d.user.text()) == (6000, "ich")
 
 

@@ -12,7 +12,7 @@ muss sich drucken und als PDF exportieren lassen.
 Schwerpunkt der ersten Version ist das **Darstellen** bestehender Schemas.
 Bearbeiten und Forward Engineering folgen in späteren Ausbaustufen.
 
-Unterstützte Dialekte: **MySQL**, **PostgreSQL**, **Microsoft SQL Server**.
+Unterstützte Dialekte: **MySQL**, **MariaDB**, **PostgreSQL**, **Microsoft SQL Server**.
 
 ## 2. Technik
 
@@ -21,7 +21,7 @@ Unterstützte Dialekte: **MySQL**, **PostgreSQL**, **Microsoft SQL Server**.
 | Sprache | Python 3.12+ |
 | Oberfläche | PySide6 (Qt 6.7+), `QGraphicsScene` / `QGraphicsView` |
 | Stil | Qt-Stil `windows11` oder Fusion mit eigener Hell/Dunkel-Palette |
-| MySQL | PyMySQL oder mysql-connector-python |
+| MySQL, MariaDB | PyMySQL |
 | PostgreSQL | psycopg |
 | SQL Server | pyodbc |
 | Passwörter | `keyring` (Windows-Anmeldeinformationsverwaltung) |
@@ -212,6 +212,19 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       abgesetzte Box (gestrichelt, kursiv, „VIEW“), gepunktete Abhängigkeitslinien,
       modellieren (Modell → Neue View …, Abhängigkeiten aus dem SQL erkannt),
       SQL-Export in Abhängigkeitsreihenfolge; materialisierte Views noch nicht
+- [x] MariaDB als eigener Dialekt:
+  - [x] `Dialect.MARIADB` mit `label` und `mysql_family` (MySQL und MariaDB: keine
+        Schemaebene, Backticks, `PRIMARY`); alle Abfragen auf `Dialect.MYSQL` geprüft
+  - [x] Einlesen über den MySQL-Adapter (nimmt Profile beider Dialekte an); der Dialekt
+        der Datenbank folgt der Serverversion, nicht dem Profil
+  - [x] Verbindungsdialog und „Neue Datenbank“ bieten MariaDB an; Rahmen-Kopfzeile und
+        SQL-Export zeigen „MariaDB“
+  - [x] Typauswahl: MySQL-Typen plus `uuid`, `inet6`, `inet4`; SQL-Export wie MySQL
+  - [x] Ältere Diagrammdateien: MySQL-Datenbanken mit MariaDB-Serverversion werden beim
+        Laden zu MariaDB; Verbindungsprofile bleiben (Passwort im Tresor hängt am Dialekt)
+  - [x] Tests: `tests/test_mariadb.py`, Live-Tests und Roundtrip mit MariaDB-Profil
+  - [ ] Später, bei Bedarf: Unterschiede im SQL-Export (z. B. `json` ↔ `longtext` mit
+        `JSON_VALID`-Prüfung, die beim Einlesen nicht erhalten bleibt)
 - [x] Notizen (Infoboxen): frei oder mit einer Tabelle verbunden, verschieben, Größe ändern,
       Doppelklick bearbeitet, Kontextmenüs (Tabelle, Notiz, freie Fläche), Entf löscht;
       gehören zum Layout der jeweiligen Ansicht (je Teildiagramm eigene Notizen)
@@ -253,6 +266,11 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
   SQL Server per Windows-Anmeldung
 - MariaDB läuft über den MySQL-Adapter; er gleicht die Abweichungen an MySQL 8 an
   (Anzeigebreite `int(11)` → `int`, gequotete Defaults `'abc'`/`NULL` → `abc`/None)
+- MariaDB ist ein eigener Dialekt (`Dialect.MARIADB`). Wo MySQL und MariaDB gleich
+  behandelt werden, `dialect.mysql_family` abfragen statt `is Dialect.MYSQL`;
+  Anzeigenamen über `dialect.label`. Dicts je Dialekt (`COMMON_TYPES`, `ID_TYPES`,
+  `DEFAULT_SCHEMAS`, `INDEX_KINDS`, `DEFAULT_USERS`) brauchen einen MariaDB-Eintrag
+- Dialekt-Auswahl in Tests über `findData(Dialect.X.value)`, nicht über die Listenposition
 - Die Anwendung selbst speichert Passwörter unter dem Dienst `erd-editor`
 - Tests, die ein echtes Menü oder einen Dialog öffnen würden, nicht mit `exec()` schreiben,
   sondern das Menü bauen und Aktionen direkt auslösen (sonst hängt der Testlauf)
@@ -269,7 +287,7 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
   Bedienung im `NotesMixin` (`ui/notes.py`). Verschieben einer Tabelle von Hand nimmt
   ihre Notiz nicht mit, „Automatisch anordnen“ schon
 - Testschema enthält drei Views (`v_kunde_land`, `v_bestellsumme`, `v_kunde_bestellungen`)
-- - Modelländerungen, Rückgängig und Neu einlesen laufen über `show_view(..., keep_view=True)`
+- Modelländerungen, Rückgängig und Neu einlesen laufen über `show_view(..., keep_view=True)`
   → `DiagramScene.update_diagram()`; nur bei geänderten Datenbanken/Schemas/Farben/
   Darstellungsgröße wird über `load()` komplett neu aufgebaut
 - Der Tabelleneditor liefert Indexe mit den **neuen** Spaltennamen

@@ -18,8 +18,27 @@ class Dialect(str, Enum):
     """Unterstützte SQL-Dialekte."""
 
     MYSQL = "mysql"
+    MARIADB = "mariadb"
     POSTGRESQL = "postgresql"
     MSSQL = "mssql"
+
+    @property
+    def label(self) -> str:
+        """Anzeigename, z. B. „SQL Server“."""
+        return _DIALECT_LABELS[self]
+
+    @property
+    def mysql_family(self) -> bool:
+        """MySQL oder MariaDB: gleicher Adapter, gleiche SQL-Grundlage, keine Schemaebene."""
+        return self in (Dialect.MYSQL, Dialect.MARIADB)
+
+
+_DIALECT_LABELS = {
+    Dialect.MYSQL: "MySQL",
+    Dialect.MARIADB: "MariaDB",
+    Dialect.POSTGRESQL: "PostgreSQL",
+    Dialect.MSSQL: "SQL Server",
+}
 
 
 class IndexKind(str, Enum):

@@ -174,7 +174,7 @@ class TestDialogs:
 
         d = DatabaseDialog({"shop"})
         assert not d.schema.isEnabled()  # MySQL
-        d.dialect.setCurrentIndex(2)
+        d.dialect.setCurrentIndex(d.dialect.findData(Dialect.MSSQL.value))
         assert d.schema.text() == "dbo" and d.schema.isEnabled()
         d.name.setText("shop")
         assert "gibt es schon" in d.message.text()

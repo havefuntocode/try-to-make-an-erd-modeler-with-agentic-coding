@@ -25,9 +25,11 @@ class SchemaAdapter(ABC):
     """
 
     dialect: Dialect
+    # Profil-Dialekte, die der Adapter bedient (Standard: nur `dialect`)
+    dialects: tuple[Dialect, ...] = ()
 
     def __init__(self, profile: ConnectionProfile, password: str | None = None) -> None:
-        if profile.dialect is not self.dialect:
+        if profile.dialect not in (self.dialects or (self.dialect,)):
             raise AdapterError(
                 f"Profil {profile.name!r} ist für {profile.dialect.value}, "
                 f"Adapter für {self.dialect.value}"
