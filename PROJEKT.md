@@ -231,7 +231,9 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
 - [x] Symbolleiste: Datei, Rückgängig, Modellieren (Datenbank, Tabelle, View, Beziehung,
       Notiz), Zoom/Anordnen, PDF/SQL; eigene SVG-Icons, Tooltips mit Tastenkürzel,
       ausgegraut, wenn nicht möglich; Rechtsklick: nur Symbole / mit Text (gespeichert)
-- [ ] Modell mit Datenbank abgleichen (Unterschiede als `ALTER TABLE`)
+- [ ] ~~Modell mit Datenbank abgleichen (Unterschiede als `ALTER TABLE`)~~ – entfällt:
+      bestehende Datenbanken werden nie verändert (siehe Abschnitt 13). Stattdessen
+      ggf. ein neu modelliertes Modell als **neue** Datenbank anlegen (Ausgestaltung offen)
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
 - [ ] n:m-Zwischentabellen optional als eine Linie
@@ -321,5 +323,9 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Endgültiger Projektname
 - Sprache der Oberfläche (Deutsch, später mehrsprachig?) – Code-Bezeichner: Englisch, Kommentare: Deutsch (entschieden)
 - Lizenz: MIT (entschieden, `LICENSE`)
+- Sicherheit (entschieden, 2026-11-22): Das Programm verändert **niemals** eine bestehende
+  Datenbank – kein `ALTER`, `DROP`, `INSERT` o. Ä. gegen vorhandene Datenbanken, auch nicht
+  auf Wunsch. Adapter lesen nur. Schreiben kommt höchstens für ein neu modelliertes Modell
+  in eine **neu angelegte** Datenbank in Frage
 - Repository: privat auf GitHub, `havefuntocode/try-to-make-an-erd-modeler-with-agentic-coding`
   (Remote `origin`, Branch `main`); Commits nur mit der Repo-eigenen Git-Identität
