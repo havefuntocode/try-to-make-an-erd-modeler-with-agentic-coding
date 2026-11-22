@@ -101,6 +101,14 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
 - **PK + FK:** kombiniertes Symbol (z. B. goldener Schlüssel mit blauem Punkt)
 - Optional übrige Spalten: Raute gefüllt = NOT NULL, Raute leer = NULL-fähig
 - Indizierte Spalten mit kleinem Zusatzsymbol markieren
+- UNIQUE (Zusatzsymbol, lila „U“-Plakette; gefüllt/leer wie bei den Rauten):
+  - **gefüllt:** Spalte ist allein eindeutig (einspaltiger UNIQUE-Index)
+  - **leer:** Spalte ist Teil einer eindeutigen Kombination (mehrspaltiger UNIQUE-Index) –
+    nur die Kombination ist eindeutig, nicht die einzelne Spalte
+  - Vorrang: allein eindeutig > Teil einer Kombination > indiziert; PK-Spalten ohne
+    Zusatzsymbol, außer sie haben zusätzlich einen eigenen einspaltigen UNIQUE-Index
+  - Tooltip der Spalte listet ihre Indexe, z. B. „UNIQUE uq_code (code)“ oder
+    „Teil von UNIQUE uq_termin (kunde_id, datum)“
 
 ### Datenbank als Behälter
 - Rechteck hinter den Entitäten, Kopfzeile mit Datenbankname, Server/Version, Zeichensatz
@@ -240,6 +248,16 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       abgesetzte Box (gestrichelt, kursiv, „VIEW“), gepunktete Abhängigkeitslinien,
       modellieren (Modell → Neue View …, Abhängigkeiten aus dem SQL erkannt),
       SQL-Export in Abhängigkeitsreihenfolge; materialisierte Views noch nicht
+- [ ] UNIQUE-Constraints (Stand 2026-11-22: Einlesen in allen Dialekten, Indexbereich,
+      1:1-Kardinalität, Tabelleneditor-Reiter „Indexe“, SQL-Export und Roundtrip waren
+      schon vorhanden):
+  - [x] Eigenes Spaltensymbol: gefüllt = allein eindeutig, leer = Teil einer eindeutigen
+        Kombination; Tooltip mit allen Indexen der Spalte (Abschnitt 6, Icons)
+  - [ ] Tabelleneditor: Häkchen „UNIQUE“ direkt an der Spalte (heute nur über „Indexe“)
+  - [ ] Gefilterte eindeutige Indexe (PostgreSQL `… WHERE …`, SQL Server Filtered Index):
+        Bedingung wird nicht gelesen – Index gilt im Modell und im Export als normales
+        UNIQUE (strenger als das Original); mindestens kennzeichnen. Ausdrucksindexe
+        (`UNIQUE (lower(email))`) noch nicht geprüft
 - [x] MariaDB als eigener Dialekt:
   - [x] `Dialect.MARIADB` mit `label` und `mysql_family` (MySQL und MariaDB: keine
         Schemaebene, Backticks, `PRIMARY`); alle Abfragen auf `Dialect.MYSQL` geprüft
@@ -308,6 +326,11 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
   Anzeigenamen über `dialect.label`. Dicts je Dialekt (`COMMON_TYPES`, `ID_TYPES`,
   `DEFAULT_SCHEMAS`, `INDEX_KINDS`, `DEFAULT_USERS`) brauchen einen MariaDB-Eintrag
 - Dialekt-Auswahl in Tests über `findData(Dialect.X.value)`, nicht über die Listenposition
+- Spaltensymbole (`diagram/markers.py`, ohne Qt): `ColumnMarker(icon, extra)` mit
+  `KeyIcon` (Hauptsymbol) und `ExtraIcon` (`indexed`, `unique`, `unique_part`; Wert =
+  SVG-Name in `resources/icons`). `column_index_notes()` liefert die Tooltip-Zeilen.
+  Neue Symbole: SVG anlegen und in `ExtraIcon` bzw. `KeyIcon` eintragen –
+  `test_all_icons_are_valid_svg` prüft alle
 - SQL-Export (`export/ddl.py`): `generate_statements()` liefert die Anweisungen inkl. der
   Prüfungen (SQL Server: `IF DB_ID … SET NOEXEC ON`, PostgreSQL: `BEGIN`, `DO $$ … $$`,
   `COMMIT`); `generate_script()` ergänzt Kopf, Hinweise (`SCRIPT_HINTS`) und bei SQL Server

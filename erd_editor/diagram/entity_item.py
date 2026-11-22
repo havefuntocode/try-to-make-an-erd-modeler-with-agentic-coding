@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from erd_editor.diagram.icons import draw_icon
-from erd_editor.diagram.markers import INDEXED_ICON, ColumnMarker, column_marker, index_label
+from erd_editor.diagram.markers import ColumnMarker, column_index_notes, column_marker, index_label
 from erd_editor.diagram.style import EntityStyle
 from erd_editor.model import Column, ColumnMode, DisplayOptions, Index, IndexKind, Table, TableRef
 
@@ -300,10 +300,10 @@ class EntityItem(QGraphicsObject):
         for row in self._columns:
             icon_y = row.top + (self._row_h - s.icon_size) / 2
             draw_icon(painter, row.marker.icon.value, QRectF(p, icon_y, s.icon_size, s.icon_size))
-            if row.marker.indexed:
+            if row.marker.extra is not None:
                 mx = p + s.icon_size + s.gap
                 my = row.top + (self._row_h - s.marker_size) / 2
-                draw_icon(painter, INDEXED_ICON, QRectF(mx, my, s.marker_size, s.marker_size))
+                draw_icon(painter, row.marker.extra.value, QRectF(mx, my, s.marker_size, s.marker_size))
             painter.setFont(s.pk_font if row.is_pk else s.column_font)
             painter.setPen(s.text)
             painter.drawText(QRectF(self._name_x, row.top, w - self._name_x - p, self._row_h), left, row.column.name)
@@ -356,7 +356,7 @@ class EntityItem(QGraphicsObject):
             return _with_comment(f"<b>{escape(self.ref.key)}</b>", self.table.comment)
         for row in self._columns:
             if row.top <= y < row.top + self._row_h:
-                return column_tooltip(row.column)
+                return column_tooltip(row.column, self.table)
         if self._more_top is not None and self._more_top <= y < self._more_top + self._row_h:
             names = [escape(c.name) for c in self._hidden[:MAX_TOOLTIP_COLUMNS]]
             if len(self._hidden) > MAX_TOOLTIP_COLUMNS:
@@ -381,13 +381,16 @@ class EntityItem(QGraphicsObject):
         super().hoverMoveEvent(event)
 
 
-def column_tooltip(c: Column) -> str:
+def column_tooltip(c: Column, table: Table | None = None) -> str:
     parts = [f"<b>{escape(c.name)}</b> {escape(c.data_type)}", "NULL" if c.nullable else "NOT NULL"]
     if c.default is not None:
         parts.append("Default: ''" if c.default == "" else f"Default: {escape(c.default)}")
     if c.auto_increment:
         parts.append("AUTO_INCREMENT")
-    return _with_comment(" · ".join(parts), c.comment)
+    text = " · ".join(parts)
+    if table is not None:
+        text += "".join(f"<br>{escape(note)}" for note in column_index_notes(table, c))
+    return _with_comment(text, c.comment)
 
 
 def view_tooltip(ref: TableRef, table: Table) -> str:

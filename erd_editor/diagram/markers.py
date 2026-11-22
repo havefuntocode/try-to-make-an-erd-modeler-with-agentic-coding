@@ -18,13 +18,29 @@ class KeyIcon(str, Enum):
     NULLABLE = "nullable"
 
 
-INDEXED_ICON = "indexed"
+class ExtraIcon(str, Enum):
+    """Kleines Zusatzsymbol hinter dem Hauptsymbol; Wert = Dateiname ohne .svg.
+
+    Gefüllt/leer wie bei den Rauten (NOT NULL/NULL): gefülltes UNIQUE = Spalte
+    allein eindeutig, leeres UNIQUE = Teil einer eindeutigen Kombination.
+    """
+
+    INDEXED = "indexed"
+    UNIQUE = "unique"
+    UNIQUE_PART = "unique_part"
+
+
+INDEXED_ICON = ExtraIcon.INDEXED.value
 
 
 @dataclass(frozen=True)
 class ColumnMarker:
     icon: KeyIcon
-    indexed: bool  # Zusatzsymbol „indiziert“ (bei PK-Spalten nicht nötig)
+    extra: ExtraIcon | None = None  # Zusatzsymbol (bei PK-Spalten meist keins)
+
+    @property
+    def indexed(self) -> bool:
+        return self.extra is not None
 
 
 def column_marker(table: Table, column: Column) -> ColumnMarker:
@@ -41,9 +57,31 @@ def column_marker(table: Table, column: Column) -> ColumnMarker:
         icon = KeyIcon.NULLABLE
     else:
         icon = KeyIcon.NOT_NULL
-    # PK-Spalten sind immer indiziert – dort wäre das Zusatzsymbol nur Rauschen
-    indexed = not is_pk and table.is_indexed_column(column.name)
-    return ColumnMarker(icon, indexed)
+    return ColumnMarker(icon, _extra(table, column.name, is_pk))
+
+
+def _extra(table: Table, name: str, is_pk: bool) -> ExtraIcon | None:
+    """Stärkste Aussage gewinnt: allein eindeutig > Teil einer Kombination > indiziert."""
+    uniques = [i for i in table.indexes if i.kind is IndexKind.UNIQUE and name in i.columns]
+    if any(len(i.columns) == 1 for i in uniques):
+        return ExtraIcon.UNIQUE
+    if is_pk:
+        # PK-Spalten sind immer indiziert – dort wäre das Zusatzsymbol nur Rauschen
+        return None
+    if uniques:
+        return ExtraIcon.UNIQUE_PART
+    return ExtraIcon.INDEXED if table.is_indexed_column(name) else None
+
+
+def column_index_notes(table: Table, column: Column) -> list[str]:
+    """Indexe einer Spalte für den Tooltip, z. B. „Teil von UNIQUE uq_t (a, b)“ (ohne PK)."""
+    notes = []
+    for index in table.indexes:
+        if index.kind is IndexKind.PRIMARY or column.name not in index.columns:
+            continue
+        kind, label = index_label(index)
+        notes.append(f"{kind} {label}" if len(index.columns) == 1 else f"Teil von {kind} {label}")
+    return notes
 
 
 def index_label(index: Index) -> tuple[str, str]:

@@ -6,7 +6,7 @@ from PySide6.QtGui import QImage, QPainter
 
 from erd_editor.diagram.entity_item import EntityItem
 from erd_editor.diagram.icons import ICON_DIR, renderer
-from erd_editor.diagram.markers import INDEXED_ICON, KeyIcon, column_marker, index_label
+from erd_editor.diagram.markers import INDEXED_ICON, ExtraIcon, KeyIcon, column_index_notes, column_marker, index_label
 from erd_editor.diagram.scene import DiagramScene
 from erd_editor.diagram.view import DiagramView
 from erd_editor.main import parse_target
@@ -45,13 +45,49 @@ class TestMarkers:
         assert not self.marker(test_schema, "kunde", "id").indexed  # PK: kein Zusatzsymbol
         assert not self.marker(test_schema, "kunde", "land_code").indexed
 
+    def test_unique_markers(self, test_schema):
+        assert self.marker(test_schema, "kundenprofil", "kunde_id").extra is ExtraIcon.UNIQUE  # uq_kunde
+        assert self.marker(test_schema, "bestellung", "kunde_id").extra is ExtraIcon.INDEXED
+
+    def test_composite_unique_marks_each_part(self):
+        from erd_editor.model import Column, Table
+
+        t = Table("termin", [Column("id", "int", False), Column("kunde_id", "int", False),
+                             Column("datum", "date", False), Column("code", "int", False)],
+                  [Index("PRIMARY", IndexKind.PRIMARY, ("id",)),
+                   Index("uq_termin", IndexKind.UNIQUE, ("kunde_id", "datum")),
+                   Index("uq_code", IndexKind.UNIQUE, ("code",)),
+                   Index("ix_code_datum", IndexKind.INDEX, ("code", "datum"))])
+        extra = {c.name: column_marker(t, c).extra for c in t.columns}
+        assert extra == {"id": None, "kunde_id": ExtraIcon.UNIQUE_PART,
+                         "datum": ExtraIcon.UNIQUE_PART, "code": ExtraIcon.UNIQUE}  # allein eindeutig gewinnt
+        assert column_index_notes(t, t.column("datum")) == [
+            "Teil von UNIQUE uq_termin (kunde_id, datum)", "Teil von INDEX ix_code_datum (code, datum)"]
+        assert column_index_notes(t, t.column("code"))[0] == "UNIQUE uq_code (code)"
+        assert column_index_notes(t, t.column("id")) == []  # PK steht schon im Symbol
+
+    def test_unique_on_composite_pk_column(self):
+        from erd_editor.model import Column, Table
+
+        t = Table("pos", [Column("a", "int", False), Column("b", "int", False)],
+                  [Index("PRIMARY", IndexKind.PRIMARY, ("a", "b")), Index("uq_b", IndexKind.UNIQUE, ("b",))])
+        assert column_marker(t, t.column("a")).extra is None
+        assert column_marker(t, t.column("b")).extra is ExtraIcon.UNIQUE
+
+    def test_tooltip_lists_indexes(self, test_schema):
+        from erd_editor.diagram.entity_item import column_tooltip
+
+        t = test_schema.find_table(shop("kundenprofil"))
+        assert "<br>UNIQUE uq_kunde (kunde_id)" in column_tooltip(t.column("kunde_id"), t)
+        assert "UNIQUE" not in column_tooltip(t.column("kunde_id"))
+
     def test_index_label(self):
         assert index_label(Index("uq_ab", IndexKind.UNIQUE, ("a", "b"))) == ("UNIQUE", "uq_ab (a, b)")
         assert index_label(Index("PRIMARY", IndexKind.PRIMARY, ("id",))) == ("PRIMARY", "(id)")
 
 
 def test_all_icons_are_valid_svg(qapp):
-    for name in [*(k.value for k in KeyIcon), INDEXED_ICON]:
+    for name in [*(k.value for k in KeyIcon), *(e.value for e in ExtraIcon), INDEXED_ICON]:
         assert (ICON_DIR / f"{name}.svg").exists()
         assert renderer(name).isValid()
 
