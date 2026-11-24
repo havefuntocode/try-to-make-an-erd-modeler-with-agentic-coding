@@ -13,7 +13,8 @@ schon gibt (Regel in PROJEKT.md, Abschnitt 13):
 Datentypen sind nativ gespeichert und werden unverändert übernommen.
 Fremdschlüssel kommen nach den Tabellen als `ALTER TABLE … ADD CONSTRAINT`,
 damit die Reihenfolge der Tabellen keine Rolle spielt (auch bei Zyklen).
-Views folgen zum Schluss, sortiert nach ihren Abhängigkeiten; ihr SQL-Text
+CHECK-Constraints stehen als `CONSTRAINT … CHECK (…)` im `CREATE TABLE`;
+ihr Ausdruck wird wie der View-Text unverändert übernommen. Views folgen zum Schluss, sortiert nach ihren Abhängigkeiten; ihr SQL-Text
 wird unverändert übernommen (er ist dialektspezifisch).
 
 `generate_statements()` liefert einzelne Anweisungen (zum Ausführen),
@@ -167,13 +168,20 @@ def _mysql(db: Database, o: DdlOptions) -> list[str]:
     # ohne IF NOT EXISTS: gibt es die Datenbank schon, bricht das Skript hier ab
     out.append(f"CREATE DATABASE {q(db.name)}{charset}{collate}")
     out.append(f"USE {q(db.name)}")
+    registry = _Names()  # Check-Namen sind in MySQL je Datenbank eindeutig
+    hint = db.dialect is Dialect.MYSQL
     for _, table in _tables(db):
         lines = [_mysql_column(c, o) for c in table.columns]
         for index in _ordered_indexes(table):
             lines.append(_mysql_index(index))
+        lines += _check_lines(table, Dialect.MYSQL, registry)
         comment = f" COMMENT={literal(table.comment)}" if o.comments and table.comment else ""
         body = ",\n  ".join(lines)
-        out.append(f"CREATE TABLE {q(table.name)} (\n  {body}\n) ENGINE=InnoDB{comment}")
+        prefix = ""
+        if hint and table.checks:
+            prefix = "-- Hinweis: CHECK-Constraints wirken erst ab MySQL 8.0.16 (ältere Versionen ignorieren sie)\n"
+            hint = False
+        out.append(f"{prefix}CREATE TABLE {q(table.name)} (\n  {body}\n) ENGINE=InnoDB{comment}")
     for _, table in _tables(db):
         for fk in table.foreign_keys:
             target = f"{q(fk.referenced_table.database)}.{q(fk.referenced_table.table)}"
@@ -246,6 +254,7 @@ def _postgres(db: Database, o: DdlOptions) -> list[str]:
                 later.append(f"CREATE INDEX {q(registry.take(index.name))} ON {full(schema, table.name)} ({cols})")
             else:
                 later.append(f"-- Index {index.name} ({index.kind.value}) hat in PostgreSQL keine direkte Entsprechung")
+        lines += _check_lines(table, d, registry)
         body = ",\n  ".join(lines)
         out.append(f"CREATE TABLE {full(schema, table.name)} (\n  {body}\n)")
         out += later
@@ -343,6 +352,7 @@ def _mssql(db: Database, o: DdlOptions) -> list[str]:
                 later.append(f"CREATE INDEX {q(index.name)} ON {full(schema, table.name)} ({cols})")
             else:
                 later.append(f"-- Index {index.name} ({index.kind.value}) hat in SQL Server keine direkte Entsprechung")
+        lines += _check_lines(table, d, registry)
         body = ",\n  ".join(lines)
         out.append(f"CREATE TABLE {full(schema, table.name)} (\n  {body}\n)")
         out += later
@@ -379,6 +389,15 @@ def _mssql(db: Database, o: DdlOptions) -> list[str]:
 
 def _ordered_indexes(table: Table) -> list[Index]:
     return sorted(table.indexes, key=lambda i: i.kind is not IndexKind.PRIMARY)
+
+
+def _check_lines(table: Table, dialect: Dialect, registry: _Names) -> list[str]:
+    """`CONSTRAINT name CHECK (ausdruck)` je Check; leere Ausdrücke entfallen."""
+    return [
+        f"CONSTRAINT {quote(dialect, registry.take(c.name))} CHECK ({c.expression.strip()})"
+        for c in table.checks
+        if c.expression.strip()
+    ]
 
 
 def _rules(fk: ForeignKey) -> str:

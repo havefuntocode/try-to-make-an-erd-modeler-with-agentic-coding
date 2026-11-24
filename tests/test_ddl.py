@@ -320,3 +320,26 @@ class TestDialog:
         assert seen[-1] == ["stammdaten"]  # Modelle vorausgewählt
         w.setWindowModified(False)
         w.close()
+
+
+@pytest.mark.parametrize("dialect", list(Dialect))
+def test_checks_in_create_table(dialect):
+    from erd_editor.model import CheckConstraint
+
+    d = _modeled(dialect)
+    schema = None if dialect.mysql_family else "lager"
+    regal = d.find_table(TableRef("lager", schema, "regal"))
+    fach = d.find_table(TableRef("lager", schema, "fach"))
+    regal.columns.append(Column("hoehe", "int"))
+    fach.columns.append(Column("hoehe", "int"))
+    regal.checks.append(CheckConstraint("ck_hoehe", "hoehe > 0", ("hoehe",)))
+    fach.checks.append(CheckConstraint("ck_hoehe", "hoehe BETWEEN 1 AND 9", ("hoehe",)))
+    fach.checks.append(CheckConstraint("ck_leer", "  ", ()))
+    script = generate_script(d)
+    q = lambda n: quote(dialect, n)  # noqa: E731
+    assert f"CONSTRAINT {q('ck_hoehe')} CHECK (hoehe > 0)" in script
+    # Namen sind (je Schema) eindeutig, leere Ausdrücke entfallen
+    assert f"CONSTRAINT {q('ck_hoehe_2')} CHECK (hoehe BETWEEN 1 AND 9)" in script
+    assert "ck_leer" not in script
+    assert ("MySQL 8.0.16" in script) == (dialect is Dialect.MYSQL)
+    assert script.count("MySQL 8.0.16") <= 1
