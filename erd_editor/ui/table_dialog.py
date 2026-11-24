@@ -1,4 +1,8 @@
-"""Tabelleneditor: Name, Kommentar, Spalten und Indexe einer Modell-Tabelle bearbeiten."""
+"""Tabelleneditor: Name, Kommentar, Spalten, Indexe und Checks einer Modell-Tabelle bearbeiten.
+
+Checks, die nur eine Spalte betreffen, stehen in der Spalte „Check“ des
+Spaltenrasters; Checks über mehrere (oder keine) Spalten im Reiter „Checks“.
+"""
 
 from __future__ import annotations
 
@@ -23,14 +27,26 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from erd_editor.model import Column, Dialect, Index, IndexKind, Table
+from erd_editor.model import CheckConstraint, Column, Dialect, Index, IndexKind, Table
+from erd_editor.model.checks import expression_columns, rename_in_expression
 from erd_editor.model.types import COMMON_TYPES, ID_TYPES
 
-NAME, TYPE, NULLABLE, PK, AUTO, DEFAULT, COMMENT = range(7)
-HEADERS = ["Name", "Datentyp", "NULL", "PK", "Auto", "Default", "Kommentar"]
+NAME, TYPE, NULLABLE, PK, AUTO, DEFAULT, CHECK, COMMENT = range(8)
+HEADERS = ["Name", "Datentyp", "NULL", "PK", "Auto", "Default", "Check", "Kommentar"]
 ORIGINAL = Qt.ItemDataRole.UserRole  # ursprünglicher Spaltenname (für Umbenennungen)
 KEY = Qt.ItemDataRole.UserRole + 1  # stabiler Zeilenschlüssel (Indexe überleben Umbenennen/Verschieben)
 PARKED = Qt.ItemDataRole.UserRole + 2  # Default, der wegen Auto-Increment ausgeblendet ist
+CURRENT = Qt.ItemDataRole.UserRole + 3  # zuletzt bekannter Spaltenname (Umbenennen in Check-Ausdrücken)
+CHECK_NAME = Qt.ItemDataRole.UserRole + 4  # Constraint-Name eines vorhandenen Checks
+
+CHECK_TIP = (
+    "Optionale Bedingung für diese Spalte, ohne CHECK und Klammern, z. B. preis > 0 oder\n"
+    "status IN ('offen', 'erledigt'). Der Ausdruck wird nativ übernommen (keine Übersetzung).\n"
+    "Bedingungen über mehrere Spalten stehen im Reiter „Checks“."
+)
+
+CK_NAME, CK_EXPRESSION, CK_COLUMNS = range(3)
+CK_HEADERS = ["Name", "Ausdruck", "Spalten"]
 
 AUTO_DEFAULT_TIP = "Auto-Increment erzeugt den Wert selbst – ein Default ist hier nicht möglich."
 DEFAULT_TIP = (
@@ -72,7 +88,7 @@ class TableDialog(QDialog):
         self._next_key = 0
         self._index_keys: list[list[int]] = []  # je Indexzeile: Spaltenschlüssel in Indexreihenfolge
         self.setWindowTitle("Tabelle bearbeiten" if table else "Neue Tabelle")
-        self.resize(820, 520)
+        self.resize(980, 520)
 
         self.name = QLineEdit(table.name if table else "")
         self.name.setPlaceholderText("z. B. kunde")
@@ -87,10 +103,19 @@ class TableDialog(QDialog):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_columns_page(), "Spalten")
         self.tabs.addTab(self._build_indexes_page(), "Indexe")
+        self.tabs.addTab(self._build_checks_page(), "Checks")
 
         if table:
+            in_grid: set[str] = set()
             for c in table.columns:
-                self.add_row(c, table.is_primary_key_column(c.name), original=c.name)
+                first = next((k for k in table.column_checks(c.name) if k.name not in in_grid), None)
+                check = (first.expression, first.name) if first else None
+                if first:
+                    in_grid.add(first.name)
+                self.add_row(c, table.is_primary_key_column(c.name), original=c.name, check=check)
+            for k in table.checks:
+                if k.name not in in_grid:  # mehrere Spalten, keine Spalte oder zweiter Check derselben Spalte
+                    self.add_check(k.name, k.expression)
             by_original = {self.grid.item(r, NAME).data(ORIGINAL): self._row_key(r) for r in range(self.grid.rowCount())}
             for index in table.indexes:
                 if index.kind is IndexKind.PRIMARY:
@@ -130,6 +155,8 @@ class TableDialog(QDialog):
         header.setSectionResizeMode(NAME, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(TYPE, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(COMMENT, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(CHECK, QHeaderView.ResizeMode.Stretch)
+        self.grid.horizontalHeaderItem(CHECK).setToolTip(CHECK_TIP)
         for col in (NULLABLE, PK, AUTO):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self.grid.itemChanged.connect(self._item_changed)
@@ -193,6 +220,37 @@ class TableDialog(QDialog):
         layout.addLayout(right, 2)
         return page
 
+    def _build_checks_page(self) -> QWidget:
+        self.ck_grid = QTableWidget(0, len(CK_HEADERS))
+        self.ck_grid.setHorizontalHeaderLabels(CK_HEADERS)
+        self.ck_grid.verticalHeader().setVisible(False)
+        self.ck_grid.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.ck_grid.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        header = self.ck_grid.horizontalHeader()
+        header.setSectionResizeMode(CK_NAME, QHeaderView.ResizeMode.Interactive)
+        self.ck_grid.setColumnWidth(CK_NAME, 200)
+        header.setSectionResizeMode(CK_EXPRESSION, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(CK_COLUMNS, QHeaderView.ResizeMode.ResizeToContents)
+        self.ck_grid.itemChanged.connect(self._check_changed)
+
+        buttons = QHBoxLayout()
+        for text, slot in [("Check hinzufügen", lambda: self.add_check()), ("Entfernen", self.remove_check)]:
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            buttons.addWidget(b)
+        buttons.addStretch(1)
+        hint = QLabel("Bedingungen über mehrere Spalten, z. B. ende >= beginn. "
+                      "Checks einer einzelnen Spalte stehen im Reiter „Spalten“ unter „Check“.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:palette(mid)")
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.ck_grid, 1)
+        layout.addLayout(buttons)
+        layout.addWidget(hint)
+        return page
+
     # ------------------------------------------------------------------ Spalten
 
     def _row_key(self, row: int) -> int:
@@ -201,7 +259,15 @@ class TableDialog(QDialog):
     def _names_by_key(self) -> dict[int, str]:
         return {self._row_key(r): self._text(r, NAME) for r in range(self.grid.rowCount())}
 
-    def add_row(self, column: Column, pk: bool = False, original: str | None = None, key: int | None = None) -> int:
+    def add_row(
+        self,
+        column: Column,
+        pk: bool = False,
+        original: str | None = None,
+        key: int | None = None,
+        check: tuple[str, str | None] | None = None,
+    ) -> int:
+        """Spaltenzeile anfügen; `check` = (Ausdruck, vorhandener Constraint-Name oder None)."""
         if key is None:
             key = self._next_key
             self._next_key += 1
@@ -211,6 +277,7 @@ class TableDialog(QDialog):
         name = QTableWidgetItem(column.name)
         name.setData(ORIGINAL, original)
         name.setData(KEY, key)
+        name.setData(CURRENT, column.name)
         self.grid.setItem(row, NAME, name)
         combo = QComboBox()
         combo.setEditable(True)
@@ -224,6 +291,10 @@ class TableDialog(QDialog):
             item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
             self.grid.setItem(row, col, item)
         self.grid.setItem(row, DEFAULT, QTableWidgetItem(column.default or ""))
+        check_item = QTableWidgetItem(check[0] if check else "")
+        check_item.setData(CHECK_NAME, check[1] if check else None)
+        check_item.setToolTip(CHECK_TIP)
+        self.grid.setItem(row, CHECK, check_item)
         self.grid.setItem(row, COMMENT, QTableWidgetItem(column.comment or ""))
         self._sync_default(row)
         self.grid.blockSignals(False)
@@ -241,7 +312,13 @@ class TableDialog(QDialog):
         if row < 0:
             return
         key = self._row_key(row)
+        removed = self._text(row, NAME)
         self.grid.removeRow(row)
+        if removed:
+            for r in reversed(range(self.ck_grid.rowCount())):
+                if expression_columns(self._ck_text(r, CK_EXPRESSION), [removed]):
+                    self.ck_grid.removeRow(r)
+            self._refresh_check_columns()
         # Spalte aus den Indexen nehmen; Indexe ohne Spalten entfallen
         for i in reversed(range(len(self._index_keys))):
             keys = [k for k in self._index_keys[i] if k != key]
@@ -258,11 +335,11 @@ class TableDialog(QDialog):
         target = row + delta
         if row < 0 or not 0 <= target < self.grid.rowCount():
             return
-        columns = [(*r, self._row_key(i)) for i, r in enumerate(self._rows())]
+        columns = [(*r, self._row_key(i), self._row_check(i)) for i, r in enumerate(self._rows())]
         columns[row], columns[target] = columns[target], columns[row]
         self.grid.setRowCount(0)
-        for column, pk, original, key in columns:
-            self.add_row(column, pk, original, key)
+        for column, pk, original, key, check in columns:
+            self.add_row(column, pk, original, key, check)
         self.grid.setCurrentCell(target, NAME)
 
     def _item_changed(self, item: QTableWidgetItem) -> None:
@@ -274,8 +351,38 @@ class TableDialog(QDialog):
             self._sync_default(item.row())
             self.grid.blockSignals(False)
         if item.column() == NAME:
+            self._column_renamed(item)
             self._refresh_indexes()
         self._validate()
+
+    def _column_renamed(self, item: QTableWidgetItem) -> None:
+        """Neuen Spaltennamen in allen Check-Ausdrücken nachziehen."""
+        old, new = item.data(CURRENT), item.text().strip()
+        if not old or not new or old == new:
+            item.setData(CURRENT, new or old)
+            return
+        # Nur umbenennen, wenn der alte Name nicht noch an einer anderen Spalte hängt
+        others = {self._text(r, NAME).lower() for r in range(self.grid.rowCount()) if r != item.row()}
+        self.grid.blockSignals(True)
+        item.setData(CURRENT, new)
+        if old.lower() not in others:
+            renames = {old: new}
+            for r in range(self.grid.rowCount()):
+                cell = self.grid.item(r, CHECK)
+                if cell and cell.text():
+                    cell.setText(rename_in_expression(cell.text(), renames))
+            self.ck_grid.blockSignals(True)
+            for r in range(self.ck_grid.rowCount()):
+                cell = self.ck_grid.item(r, CK_EXPRESSION)
+                cell.setText(rename_in_expression(cell.text(), renames))
+            self.ck_grid.blockSignals(False)
+        self.grid.blockSignals(False)
+        self._refresh_check_columns()
+
+    def _row_check(self, row: int) -> tuple[str, str | None] | None:
+        item = self.grid.item(row, CHECK)
+        text = item.text().strip() if item else ""
+        return (text, item.data(CHECK_NAME)) if text else None
 
     def _sync_default(self, row: int) -> None:
         """Default-Zelle sperren, solange die Spalte Auto-Increment ist.
@@ -428,6 +535,87 @@ class TableDialog(QDialog):
             for r in range(self.idx_grid.rowCount())
         ]
 
+    # ------------------------------------------------------------------ Checks (Reiter)
+
+    def _ck_text(self, row: int, col: int) -> str:
+        item = self.ck_grid.item(row, col)
+        return item.text().strip() if item else ""
+
+    def add_check(self, name: str | None = None, expression: str = "") -> int:
+        """Zeile im Reiter „Checks“ anfügen; ohne Namen mit Vorschlag."""
+        if name is None:
+            base = f"{self.name.text().strip() or 'tabelle'}_check"
+            taken = {n for n, _ in self._all_check_names()}
+            name, n = base, 2
+            while name in taken:
+                name, n = f"{base}_{n}", n + 1
+        self.ck_grid.blockSignals(True)
+        row = self.ck_grid.rowCount()
+        self.ck_grid.insertRow(row)
+        self.ck_grid.setItem(row, CK_NAME, QTableWidgetItem(name))
+        self.ck_grid.setItem(row, CK_EXPRESSION, QTableWidgetItem(expression))
+        cols = QTableWidgetItem()
+        cols.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)  # wird berechnet
+        self.ck_grid.setItem(row, CK_COLUMNS, cols)
+        self.ck_grid.blockSignals(False)
+        self._refresh_check_columns()
+        self._validate()
+        return row
+
+    def remove_check(self) -> None:
+        row = self.ck_grid.currentRow()
+        if row >= 0:
+            self.ck_grid.removeRow(row)
+            self._validate()
+
+    def _check_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() == CK_EXPRESSION:
+            self._refresh_check_columns()
+        self._validate()
+
+    def _refresh_check_columns(self) -> None:
+        """Spalte „Spalten“ im Reiter aus den Ausdrücken neu berechnen."""
+        names = [self._text(r, NAME) for r in range(self.grid.rowCount())]
+        self.ck_grid.blockSignals(True)
+        for r in range(self.ck_grid.rowCount()):
+            cols = expression_columns(self._ck_text(r, CK_EXPRESSION), names)
+            self.ck_grid.item(r, CK_COLUMNS).setText(", ".join(cols))
+        self.ck_grid.blockSignals(False)
+
+    def _all_check_names(self) -> list[tuple[str, str]]:
+        """(Name, Herkunft) aller Checks: vorhandene Namen aus dem Raster, Namen aus dem Reiter."""
+        result = []
+        for r in range(self.grid.rowCount()):
+            check = self._row_check(r)
+            if check and check[1]:
+                result.append((check[1], self._text(r, NAME)))
+        result += [(self._ck_text(r, CK_NAME), "") for r in range(self.ck_grid.rowCount())]
+        return result
+
+    def checks(self) -> list[CheckConstraint]:
+        """Alle Checks mit den neuen Spaltennamen; Spalten-Checks ohne Namen bekommen einen."""
+        rows = self._rows()
+        names = [c.name for c, _, _ in rows]
+        taken = {n for n, _ in self._all_check_names() if n}
+        table = self.name.text().strip() or "tabelle"
+        result = []
+        for r, (column, _, _) in enumerate(rows):
+            check = self._row_check(r)
+            if not check:
+                continue
+            expression, name = check
+            if not name:
+                base, n = f"{table}_{column.name}_check", 2
+                name = base
+                while name in taken:
+                    name, n = f"{base}_{n}", n + 1
+                taken.add(name)
+            result.append(CheckConstraint(name, expression, expression_columns(expression, names) or (column.name,)))
+        for r in range(self.ck_grid.rowCount()):
+            expression = self._ck_text(r, CK_EXPRESSION)
+            result.append(CheckConstraint(self._ck_text(r, CK_NAME), expression, expression_columns(expression, names)))
+        return result
+
     # ------------------------------------------------------------------ Ergebnis
 
     def _checked(self, row: int, col: int) -> bool:
@@ -472,6 +660,7 @@ class TableDialog(QDialog):
             indexes=indexes,
             foreign_keys=list(old.foreign_keys) if old else [],
             comment=self.comment.text().strip() or None,
+            checks=self.checks(),
         )
 
     def column_renames(self) -> dict[str, str]:
@@ -508,5 +697,12 @@ class TableDialog(QDialog):
             problem = "Indexnamen müssen eindeutig sein (auch gegenüber dem Primärschlüssel)."
         elif empty := next((i.name for i in indexes if not i.columns), None):
             problem = f"Index „{empty}“ braucht mindestens eine Spalte."
+        elif any(not self._ck_text(r, CK_NAME) for r in range(self.ck_grid.rowCount())):
+            problem = "Jeder Check braucht einen Namen."
+        elif nameless := next((self._ck_text(r, CK_NAME) for r in range(self.ck_grid.rowCount())
+                               if not self._ck_text(r, CK_EXPRESSION)), None):
+            problem = f"Check „{nameless}“ braucht einen Ausdruck."
+        elif len(check_names := [n.lower() for n, _ in self._all_check_names()]) != len(set(check_names)):
+            problem = "Checknamen müssen eindeutig sein."
         self.message.setText(problem)
         self.box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(not problem)

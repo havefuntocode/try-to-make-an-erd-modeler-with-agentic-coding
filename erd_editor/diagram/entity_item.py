@@ -390,6 +390,8 @@ def column_tooltip(c: Column, table: Table | None = None) -> str:
     text = " · ".join(parts)
     if table is not None:
         text += "".join(f"<br>{escape(note)}" for note in column_index_notes(table, c))
+        # alle Checks, die die Spalte benutzen (auch solche über mehrere Spalten)
+        text += "".join(f"<br>Check: {escape(k.expression)}" for k in table.checks if c.name in k.columns)
     return _with_comment(text, c.comment)
 
 

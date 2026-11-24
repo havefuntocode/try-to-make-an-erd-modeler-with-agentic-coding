@@ -115,3 +115,93 @@ def test_delete_relationship_drops_checks_of_dropped_columns(model):
     t.checks.append(CheckConstraint("ck_lager", "lager_id > 0", ("lager_id",)))
     d = delete_relationship(d, REF, "fk_lager")
     assert [c.name for c in d.find_table(REF).checks] == ["artikel_preis_check", "artikel_rabatt_check"]
+
+
+class TestTableDialog:
+    @pytest.fixture
+    def dialog(self, qapp):
+        from erd_editor.ui.table_dialog import TableDialog
+
+        t = table_with_checks()
+        t.columns.append(Column("ende", "date"))
+        t.checks.append(CheckConstraint("ck_ende", "ende > '2000-01-01'", ("ende",)))
+        t.checks.append(CheckConstraint("ck_ende2", "ende < '2100-01-01'", ("ende",)))  # zweiter Check derselben Spalte
+        return TableDialog(Dialect.MYSQL, t)
+
+    def test_load_splits_column_and_table_checks(self, dialog):
+        from erd_editor.ui.table_dialog import CHECK, CK_COLUMNS, CK_EXPRESSION, CK_NAME
+
+        assert [dialog._text(r, CHECK) for r in range(4)] == ["", "preis > 0", "", "ende > '2000-01-01'"]
+        assert [(dialog._ck_text(r, CK_NAME), dialog._ck_text(r, CK_EXPRESSION), dialog._ck_text(r, CK_COLUMNS))
+                for r in range(dialog.ck_grid.rowCount())] == [
+            ("artikel_rabatt_check", "rabatt < preis", "rabatt, preis"),
+            ("ck_ende2", "ende < '2100-01-01'", "ende"),
+        ]
+        assert dialog.message.text() == ""
+        assert dialog.table().checks == [
+            CheckConstraint("artikel_preis_check", "preis > 0", ("preis",)),
+            CheckConstraint("ck_ende", "ende > '2000-01-01'", ("ende",)),
+            CheckConstraint("artikel_rabatt_check", "rabatt < preis", ("rabatt", "preis")),
+            CheckConstraint("ck_ende2", "ende < '2100-01-01'", ("ende",)),
+        ]
+
+    def test_new_column_check_gets_name(self, dialog):
+        from erd_editor.ui.table_dialog import CHECK
+
+        dialog.grid.item(0, CHECK).setText("id > 0")
+        check = dialog.table().checks[0]
+        assert (check.name, check.expression, check.columns) == ("artikel_id_check", "id > 0", ("id",))
+
+    def test_rename_column_rewrites_expressions(self, dialog):
+        from erd_editor.ui.table_dialog import CHECK, CK_COLUMNS, CK_EXPRESSION, NAME
+
+        dialog.grid.item(1, NAME).setText("betrag")
+        assert dialog._text(1, CHECK) == "betrag > 0"
+        assert dialog._ck_text(0, CK_EXPRESSION) == "rabatt < betrag"
+        assert dialog._ck_text(0, CK_COLUMNS) == "rabatt, betrag"
+        assert dialog.column_renames() == {"preis": "betrag"}
+
+    def test_move_keeps_checks(self, dialog):
+        from erd_editor.ui.table_dialog import CHECK
+
+        dialog.grid.setCurrentCell(1, 0)
+        dialog.move_row(-1)
+        assert dialog._text(0, CHECK) == "preis > 0"
+        assert dialog.table().checks[0].name == "artikel_preis_check"
+
+    def test_remove_column_drops_table_checks(self, dialog):
+        dialog.grid.setCurrentCell(2, 0)  # rabatt
+        dialog.remove_row()
+        assert [c.name for c in dialog.table().checks] == ["artikel_preis_check", "ck_ende", "ck_ende2"]
+
+    def test_tab_validation(self, dialog):
+        from erd_editor.ui.table_dialog import CK_EXPRESSION, CK_NAME
+
+        row = dialog.add_check()
+        assert dialog._ck_text(row, CK_NAME) == "artikel_check"
+        assert "braucht einen Ausdruck" in dialog.message.text()
+        dialog.ck_grid.item(row, CK_EXPRESSION).setText("preis >= rabatt")
+        assert dialog.message.text() == ""
+        dialog.ck_grid.item(row, CK_NAME).setText("CK_ENDE")
+        assert "eindeutig" in dialog.message.text()
+        dialog.ck_grid.item(row, CK_NAME).setText("")
+        assert "braucht einen Namen" in dialog.message.text()
+
+    def test_edit_in_model_via_replace_table(self, dialog, model):
+        from erd_editor.ui.table_dialog import NAME
+
+        dialog.grid.item(1, NAME).setText("betrag")
+        t = dialog.table()
+        t.columns = [c for c in t.columns if c.name != "ende"]
+        t.checks = [c for c in t.checks if "ende" not in c.columns]
+        d = replace_table(model, REF, t, dialog.column_renames(), final_indexes=True)
+        assert d.validate() == []
+        assert d.find_table(REF).checks[0].expression == "betrag > 0"
+
+
+def test_column_tooltip_lists_checks():
+    from erd_editor.diagram.entity_item import column_tooltip
+
+    t = table_with_checks()
+    assert "Check: preis &gt; 0<br>Check: rabatt &lt; preis" in column_tooltip(t.column("preis"), t)
+    assert "Check" not in column_tooltip(t.column("id"), t)
