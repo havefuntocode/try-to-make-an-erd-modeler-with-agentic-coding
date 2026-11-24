@@ -287,6 +287,11 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
   - [ ] Variante 2 (offen, noch nicht entschieden): Programm legt die neue Datenbank
         selbst an – nur für modellierte Datenbanken, nur wenn der Name auf dem Server
         frei ist, nie `DROP`. Wäre der erste Schreibzugriff des Programms
+- [x] Default-Werte (2026-11-24): Modell, Einlesen, Tooltip und SQL-Export gab es schon;
+      Tabelleneditor jetzt mit Regeln: Default-Zelle bei Auto-Increment gesperrt (Wert wird
+      geparkt und beim Abwählen von „Auto“ zurückgeholt, z. B. `nextval(...)`), bei PK
+      erlaubt (UUID-Schlüssel mit `gen_random_uuid()`/`NEWID()`/`UUID()`), Default `NULL`
+      bei NOT-NULL-Spalte wird abgelehnt; Tooltip mit Beispielen an der Spaltenüberschrift
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
 - [ ] n:m-Zwischentabellen optional als eine Linie

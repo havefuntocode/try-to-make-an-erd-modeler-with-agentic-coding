@@ -30,6 +30,14 @@ NAME, TYPE, NULLABLE, PK, AUTO, DEFAULT, COMMENT = range(7)
 HEADERS = ["Name", "Datentyp", "NULL", "PK", "Auto", "Default", "Kommentar"]
 ORIGINAL = Qt.ItemDataRole.UserRole  # ursprünglicher Spaltenname (für Umbenennungen)
 KEY = Qt.ItemDataRole.UserRole + 1  # stabiler Zeilenschlüssel (Indexe überleben Umbenennen/Verschieben)
+PARKED = Qt.ItemDataRole.UserRole + 2  # Default, der wegen Auto-Increment ausgeblendet ist
+
+AUTO_DEFAULT_TIP = "Auto-Increment erzeugt den Wert selbst – ein Default ist hier nicht möglich."
+DEFAULT_TIP = (
+    "Optionaler Standardwert, z. B. 0, 'offen', CURRENT_TIMESTAMP oder gen_random_uuid().\n"
+    "Text ohne Anführungszeichen wird beim SQL-Export als Literal gequotet; "
+    "leerer Text: ''. Leeres Feld = kein Default."
+)
 
 IDX_NAME, IDX_KIND, IDX_COLUMNS = range(3)
 IDX_HEADERS = ["Name", "Art", "Spalten"]
@@ -114,6 +122,7 @@ class TableDialog(QDialog):
     def _build_columns_page(self) -> QWidget:
         self.grid = QTableWidget(0, len(HEADERS))
         self.grid.setHorizontalHeaderLabels(HEADERS)
+        self.grid.horizontalHeaderItem(DEFAULT).setToolTip(DEFAULT_TIP)
         self.grid.verticalHeader().setVisible(False)
         self.grid.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.grid.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -216,6 +225,7 @@ class TableDialog(QDialog):
             self.grid.setItem(row, col, item)
         self.grid.setItem(row, DEFAULT, QTableWidgetItem(column.default or ""))
         self.grid.setItem(row, COMMENT, QTableWidgetItem(column.comment or ""))
+        self._sync_default(row)
         self.grid.blockSignals(False)
         self._refresh_indexes()
         self._validate()
@@ -259,9 +269,37 @@ class TableDialog(QDialog):
         # Primärschlüsselspalten sind nie NULL-fähig
         if item.column() == PK and item.checkState() == Qt.CheckState.Checked:
             self.grid.item(item.row(), NULLABLE).setCheckState(Qt.CheckState.Unchecked)
+        if item.column() == AUTO:
+            self.grid.blockSignals(True)
+            self._sync_default(item.row())
+            self.grid.blockSignals(False)
         if item.column() == NAME:
             self._refresh_indexes()
         self._validate()
+
+    def _sync_default(self, row: int) -> None:
+        """Default-Zelle sperren, solange die Spalte Auto-Increment ist.
+
+        Ein vorhandener Wert wird dabei geparkt und beim Abwählen von „Auto“
+        zurückgeholt (PostgreSQL-`serial` bringt z. B. `nextval(...)` mit).
+        """
+        item = self.grid.item(row, DEFAULT)
+        if item is None:
+            return
+        editable = Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if self._checked(row, AUTO):
+            if item.text():
+                item.setData(PARKED, item.text())
+                item.setText("")
+            item.setFlags(Qt.ItemFlag.ItemIsSelectable)  # ausgegraut, nicht bearbeitbar
+            item.setToolTip(AUTO_DEFAULT_TIP)
+        else:
+            parked = item.data(PARKED)
+            if parked and not item.text():
+                item.setText(parked)
+            item.setData(PARKED, None)
+            item.setFlags(editable)
+            item.setToolTip(DEFAULT_TIP)
 
     # ------------------------------------------------------------------ Indexe
 
@@ -404,13 +442,14 @@ class TableDialog(QDialog):
         rows = []
         for r in range(self.grid.rowCount()):
             pk = self._checked(r, PK)
+            auto = self._checked(r, AUTO)
             column = Column(
                 name=self._text(r, NAME),
                 data_type=self.grid.cellWidget(r, TYPE).currentText().strip(),
                 nullable=self._checked(r, NULLABLE) and not pk,
-                default=self._text(r, DEFAULT) or None,
+                default=None if auto else self._text(r, DEFAULT) or None,
                 comment=self._text(r, COMMENT) or None,
-                auto_increment=self._checked(r, AUTO),
+                auto_increment=auto,
             )
             rows.append((column, pk, self.grid.item(r, NAME).data(ORIGINAL)))
         return rows
@@ -459,6 +498,8 @@ class TableDialog(QDialog):
             problem = "Spaltennamen müssen eindeutig sein."
         elif any(not c.data_type for c, _, _ in rows):
             problem = "Jede Spalte braucht einen Datentyp."
+        elif bad := next((c.name for c, _, _ in rows if not c.nullable and (c.default or "").upper() == "NULL"), None):
+            problem = f"Spalte „{bad}“ ist NOT NULL – der Default NULL ist dort nicht möglich."
         elif any(not n for n in index_names):
             problem = "Jeder Index braucht einen Namen."
         elif len(index_names) != len(set(index_names)) or (

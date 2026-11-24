@@ -162,6 +162,41 @@ class TestDialogs:
         d.name.setText("t")
         assert d.table().primary_key_columns == ("id", "code")
 
+    def test_default_locked_for_auto_increment(self, qapp):
+        from PySide6.QtCore import Qt
+
+        from erd_editor.ui.table_dialog import AUTO, DEFAULT, PK
+
+        d = TableDialog(Dialect.POSTGRESQL)
+        d.name.setText("t")
+        # neue Tabelle: id ist Auto → Default-Zelle gesperrt
+        assert not d.grid.item(0, DEFAULT).flags() & Qt.ItemFlag.ItemIsEditable
+        # PK ohne Auto (z. B. UUID) darf einen Default haben
+        row = d.add_row(Column("uid", "uuid", nullable=False, default="gen_random_uuid()"))
+        d.grid.item(row, PK).setCheckState(Qt.CheckState.Checked)
+        assert d.grid.item(row, DEFAULT).flags() & Qt.ItemFlag.ItemIsEditable
+        # serial: Default wird geparkt und beim Abwählen von Auto zurückgeholt
+        row = d.add_row(Column("nr", "integer", default="nextval('t_nr_seq'::regclass)", auto_increment=True))
+        assert d.grid.item(row, DEFAULT).text() == ""
+        assert d._rows()[row][0].default is None
+        d.grid.item(row, AUTO).setCheckState(Qt.CheckState.Unchecked)
+        assert d.grid.item(row, DEFAULT).text() == "nextval('t_nr_seq'::regclass)"
+        assert d.grid.item(row, DEFAULT).flags() & Qt.ItemFlag.ItemIsEditable
+        d.grid.item(row, AUTO).setCheckState(Qt.CheckState.Checked)
+        assert d._rows()[row][0].default is None
+        assert [c.default for c, _, _ in d._rows()][:2] == [None, "gen_random_uuid()"]
+        assert d.message.text() == ""
+
+    def test_default_null_needs_nullable_column(self, qapp):
+        d = TableDialog(Dialect.MYSQL)
+        d.name.setText("t")
+        d.add_row(Column("status", "varchar(10)", nullable=False, default="null"))
+        assert "NOT NULL" in d.message.text()
+        d.add_row(Column("bem", "text", nullable=True, default="NULL"))
+        d.grid.removeRow(1)
+        d._validate()
+        assert d.message.text() == ""
+
     def test_move_rows(self, qapp):
         d = TableDialog(Dialect.MYSQL)
         d.add_row(Column("b", "int"))
