@@ -205,3 +205,69 @@ def test_column_tooltip_lists_checks():
     t = table_with_checks()
     assert "Check: preis &gt; 0<br>Check: rabatt &lt; preis" in column_tooltip(t.column("preis"), t)
     assert "Check" not in column_tooltip(t.column("id"), t)
+
+
+@pytest.mark.parametrize(
+    ("raw", "clean"),
+    [
+        ("CHECK ((preis > (0)::numeric)) NOT VALID", "preis > (0)::numeric"),
+        ("CHECK (id > 0)", "id > 0"),
+        ("([preis]>=(0))", "[preis]>=(0)"),
+        ("(`status` in (_utf8mb4'offen',_utf8mb4'erledigt'))", "`status` in ('offen','erledigt')"),
+        ("json_valid(`inhalt`)", "json_valid(`inhalt`)"),
+        ("_rabatt > 0", "_rabatt > 0"),  # Spalte mit Unterstrich ist kein Zeichensatz-Präfix
+    ],
+)
+def test_clean_check_expression(raw, clean):
+    from erd_editor.model.checks import clean_check_expression
+
+    assert clean_check_expression(raw) == clean
+
+
+def _rows(**base):
+    return [dict(base)]
+
+
+def test_build_database_reads_checks_in_all_adapters():
+    from erd_editor.adapters import mssql, mysql, postgres
+
+    col = {"column_name": "preis", "nullable": 0, "is_nullable": "NO", "column_default": None, "comment": None}
+    my = mysql.build_database(
+        "shop",
+        tables=[{"table_name": "artikel", "comment": None}],
+        columns=[{**col, "table_name": "artikel", "column_type": "decimal(10,2)", "extra": ""}],
+        indexes=[], foreign_keys=[],
+        checks=[{"table_name": "artikel", "constraint_name": "artikel_chk_1",
+                 "expression": "(`status` in (_utf8mb4\'offen\'))"},
+                {"table_name": "artikel", "constraint_name": "ck_preis", "expression": "(`preis` > 0)"}],
+        server_version="8.4.0",
+    )
+    t = my.schemas[0].tables[0]
+    assert [(c.name, c.expression, c.columns) for c in t.checks] == [
+        ("artikel_chk_1", "`status` in ('offen')", ()),
+        ("ck_preis", "`preis` > 0", ("preis",)),
+    ]
+
+    pg = postgres.build_database(
+        "shop",
+        schemas=[{"schema_name": "public"}],
+        tables=[{"schema_name": "public", "table_name": "artikel", "comment": None, "kind": "r"}],
+        columns=[{**col, "schema_name": "public", "table_name": "artikel", "data_type": "numeric",
+                  "identity": "", "generated": ""}],
+        indexes=[], foreign_keys=[],
+        checks=[{"schema_name": "public", "table_name": "artikel", "constraint_name": "artikel_preis_check",
+                 "expression": "CHECK ((preis > (0)::numeric))"}],
+    )
+    assert pg.schemas[0].tables[0].checks[0].expression == "preis > (0)::numeric"
+    assert pg.schemas[0].tables[0].checks[0].columns == ("preis",)
+
+    ms = mssql.build_database(
+        "shop",
+        schemas=[{"schema_name": "dbo"}],
+        tables=[{"schema_name": "dbo", "table_name": "artikel", "comment": None, "kind": "U"}],
+        columns=[{**col, "schema_name": "dbo", "table_name": "artikel", "type_name": "decimal", "max_length": 9,
+                  "precision": 10, "scale": 2, "is_user_type": 0, "is_identity": 0}],
+        indexes=[], foreign_keys=[],
+        checks=[{"schema_name": "dbo", "table_name": "artikel", "constraint_name": "CK_x", "expression": "([preis]>(0))"}],
+    )
+    assert [(c.expression, c.columns) for c in ms.schemas[0].tables[0].checks] == [("[preis]>(0)", ("preis",))]

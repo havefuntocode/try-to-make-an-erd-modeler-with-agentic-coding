@@ -34,6 +34,7 @@ from erd_editor.model import (
     TableKind,
     TableRef,
 )
+from erd_editor.model.checks import add_check
 
 Row = Mapping[str, Any]
 
@@ -154,6 +155,22 @@ SQL_FOREIGN_KEYS = f"""
     ORDER BY n.nspname, t.relname, con.conname, k.ord
 """
 
+# CHECK-Constraints von Tabellen (contype 'c'; NOT NULL-Constraints ab PostgreSQL 18 sind 'n')
+SQL_CHECKS = f"""
+    SELECT n.nspname   AS schema_name,
+           t.relname   AS table_name,
+           con.conname AS constraint_name,
+           pg_get_constraintdef(con.oid) AS expression
+    FROM pg_constraint con
+    JOIN pg_class t      ON t.oid = con.conrelid
+    JOIN pg_namespace n  ON n.oid = t.relnamespace
+    WHERE con.contype = 'c'
+      AND t.relkind IN ('r', 'p')
+      AND NOT t.relispartition
+      AND {SYSTEM_SCHEMA_FILTER}
+    ORDER BY n.nspname, t.relname, con.conname
+"""
+
 # Tabellen/Views, die eine View benutzt: über die Rewrite-Regel der View
 SQL_VIEW_USAGE = f"""
     SELECT DISTINCT n.nspname  AS schema_name,
@@ -213,6 +230,7 @@ def build_database(
     indexes: Iterable[Row],
     foreign_keys: Iterable[Row],
     view_usage: Iterable[Row] = (),
+    checks: Iterable[Row] = (),
     charset: str | None = None,
     collation: str | None = None,
     server_version: str | None = None,
@@ -282,6 +300,11 @@ def build_database(
                 on_delete=FK_RULES.get(_text(first["delete_rule"]) or ""),
             )
         )
+
+    for row in checks:
+        t = table(row)
+        if t is not None and not t.is_view:
+            add_check(t, row["constraint_name"], _text(row["expression"]) or "")
 
     for row in view_usage:
         view = table({"schema_name": row["schema_name"], "table_name": row["view_name"]})
@@ -369,6 +392,7 @@ class PostgresAdapter(SchemaAdapter):
                 indexes=self._query(conn, SQL_INDEXES),
                 foreign_keys=self._query(conn, SQL_FOREIGN_KEYS),
                 view_usage=self._query(conn, SQL_VIEW_USAGE),
+                checks=self._query(conn, SQL_CHECKS),
                 charset=_text(info["charset"]),
                 collation=_text(info["collation"]),
                 server_version=self.server_version(),

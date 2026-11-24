@@ -38,6 +38,7 @@ from erd_editor.model import (
     TableKind,
     TableRef,
 )
+from erd_editor.model.checks import add_check
 
 Row = Mapping[str, Any]
 
@@ -127,6 +128,30 @@ SQL_FOREIGN_KEYS = """
     ORDER BY kcu.TABLE_NAME, kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
 """
 
+# MySQL ab 8.0.16: CHECK_CONSTRAINTS kennt keine Tabelle, die steht in TABLE_CONSTRAINTS
+SQL_CHECKS = """
+    SELECT tc.TABLE_NAME      AS table_name,
+           tc.CONSTRAINT_NAME AS constraint_name,
+           cc.CHECK_CLAUSE    AS expression
+    FROM information_schema.TABLE_CONSTRAINTS tc
+    JOIN information_schema.CHECK_CONSTRAINTS cc
+      ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA
+     AND cc.CONSTRAINT_NAME   = tc.CONSTRAINT_NAME
+    WHERE tc.TABLE_SCHEMA = %s
+      AND tc.CONSTRAINT_TYPE = 'CHECK'
+    ORDER BY tc.TABLE_NAME, tc.CONSTRAINT_NAME
+"""
+
+# MariaDB: Spalten-Checks heißen wie ihre Spalte, Namen sind nur je Tabelle eindeutig
+SQL_CHECKS_MARIADB = """
+    SELECT TABLE_NAME      AS table_name,
+           CONSTRAINT_NAME AS constraint_name,
+           CHECK_CLAUSE    AS expression
+    FROM information_schema.CHECK_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA = %s
+    ORDER BY TABLE_NAME, CONSTRAINT_NAME
+"""
+
 
 def _decode(value: Any) -> str | None:
     """Wert als Text; Bytes werden dekodiert, None bleibt None."""
@@ -213,6 +238,7 @@ def build_database(
     foreign_keys: Iterable[Row],
     views: Iterable[Row] = (),
     view_usage: Iterable[Row] | None = None,
+    checks: Iterable[Row] = (),
     charset: str | None = None,
     collation: str | None = None,
     server_version: str | None = None,
@@ -313,6 +339,14 @@ def build_database(
             )
         )
 
+    for row in checks:
+        t = by_name.get(_text(row["table_name"]))
+        if t is not None and not t.is_view:
+            expression = _decode(row["expression"]) or ""
+            if not mariadb:  # MySQL liefert Hochkommas in CHECK_CLAUSE escaped: \'offen\'
+                expression = expression.replace("\\'", "'")
+            add_check(t, _text(row["constraint_name"]), expression)
+
     return Database(
         name=name,
         dialect=Dialect.MARIADB if mariadb else Dialect.MYSQL,
@@ -380,10 +414,20 @@ class MySqlAdapter(SchemaAdapter):
         except pymysql.MySQLError:
             return None
 
+    def _checks(self, name: str, version: str) -> list[Row]:
+        """CHECK-Constraints – leer, wenn der Server sie nicht kennt (MySQL < 8.0.16)."""
+        import pymysql
+
+        try:
+            return self._query(SQL_CHECKS_MARIADB if is_mariadb(version) else SQL_CHECKS, name)
+        except pymysql.MySQLError:
+            return []
+
     def read_database(self, name: str) -> Database:
         info = self._query(SQL_DATABASE_INFO, name)
         if not info:
             raise AdapterError(f"Datenbank {name!r} nicht gefunden")
+        version = self.server_version()
         return build_database(
             name,
             tables=self._query(SQL_TABLES, name),
@@ -392,8 +436,9 @@ class MySqlAdapter(SchemaAdapter):
             foreign_keys=self._query(SQL_FOREIGN_KEYS, name),
             views=self._query(SQL_VIEWS, name),
             view_usage=self._view_usage(name),
+            checks=self._checks(name, version),
             charset=_text(info[0]["charset"]),
             collation=_text(info[0]["collation"]),
-            server_version=self.server_version(),
+            server_version=version,
             connection_profile=self.profile.name,
         )

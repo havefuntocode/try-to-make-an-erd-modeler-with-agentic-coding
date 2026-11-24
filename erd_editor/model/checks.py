@@ -95,3 +95,42 @@ def _closing(expression: str) -> int:
                     return pos
         pos += len(t)
     return -1
+
+
+_CHECK_PREFIX = re.compile(r"^\s*CHECK\s*", re.IGNORECASE)
+_NOT_VALID = re.compile(r"\s+NOT\s+VALID\s*$", re.IGNORECASE)
+
+
+def clean_check_expression(text: str) -> str:
+    """Ausdruck, wie ihn eine Datenbank liefert, auf den reinen Ausdruck kürzen.
+
+    - PostgreSQL: `CHECK ((preis > (0)::numeric)) NOT VALID` → `preis > (0)::numeric`
+    - SQL Server: `([preis]>(0))` → `[preis]>(0)`
+    - MySQL: ``(`preis` > 0)`` → `` `preis` > 0 ``; Zeichensatz-Präfixe vor
+      Literalen (`_utf8mb4'offen'`) entfallen
+    """
+    e = _NOT_VALID.sub("", _CHECK_PREFIX.sub("", text.strip()))
+    e = _drop_charset_introducers(e)
+    return strip_outer_parens(e)
+
+
+def _drop_charset_introducers(expression: str) -> str:
+    parts: list[str] = []
+    items = [(m.lastgroup, m.group()) for m in _TOKEN.finditer(expression)]
+    for i, (kind, text) in enumerate(items):
+        nxt = items[i + 1] if i + 1 < len(items) else None
+        if kind == "ident" and text.startswith("_") and nxt is not None and nxt[0] == "string" \
+                and nxt[1].startswith("'"):
+            continue
+        parts.append(text)
+    return "".join(parts)
+
+
+def add_check(table, name: str, raw_expression: str) -> None:
+    """Check aus einer Datenbankzeile an eine eingelesene Tabelle hängen (Spalten aus dem Ausdruck)."""
+    from erd_editor.model.schema import CheckConstraint
+
+    expression = clean_check_expression(raw_expression or "")
+    if expression:
+        columns = expression_columns(expression, [c.name for c in table.columns])
+        table.checks.append(CheckConstraint(name, expression, columns))

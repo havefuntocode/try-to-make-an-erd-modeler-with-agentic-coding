@@ -66,9 +66,11 @@ tests/
 - **Diagramm** – enthält eine oder mehrere Datenbanken
 - **Datenbank** – Name, Dialekt, Verbindungsprofil, Server/Version, Zeichensatz/Kollation, Farbe
 - **Schema** – nur bei PostgreSQL und SQL Server (`public`, `dbo`, …); bei MySQL ist Datenbank = Schema
-- **Tabelle** – Name, Kommentar, Spalten, Indexe
+- **Tabelle** – Name, Kommentar, Spalten, Indexe, Checks
 - **Spalte** – Name, nativer Datentyp, NULL-fähig, Default, Kommentar, ist PK, ist FK, ist indiziert
 - **Index** – Name, Typ (PRIMARY, UNIQUE, INDEX, FULLTEXT, …), Spalten in Reihenfolge
+- **Check** – Name, nativer Ausdruck (ohne `CHECK (…)`), benutzte Spalten (aus dem Ausdruck);
+  nur auf Tabellenebene, weil die Datenbanken Spalten- und Tabellen-Checks gleich speichern
 - **Beziehung** – FK-Name, Quelltabelle und -spalten, Zieltabelle und -spalten,
   identifizierend ja/nein, Kardinalität, optionale manuelle Überschreibungen
 
@@ -83,6 +85,7 @@ Ein Typ-Mapping zwischen Dialekten wird erst für Forward Engineering benötigt.
 | PK, FK | `TABLE_CONSTRAINTS`, `KEY_COLUMN_USAGE`, `REFERENTIAL_CONSTRAINTS` | `information_schema` bzw. `pg_constraint` | `sys.foreign_keys`, `sys.foreign_key_columns` |
 | Indexe | `information_schema.STATISTICS` | `pg_catalog` (`pg_index`, `pg_class`) | `sys.indexes`, `sys.index_columns` |
 | Kommentare | `COLUMN_COMMENT`, `TABLE_COMMENT` | `pg_description` | `sys.extended_properties` |
+| Checks | `TABLE_CONSTRAINTS` + `CHECK_CONSTRAINTS` (ab 8.0.16; MariaDB nur `CHECK_CONSTRAINTS`) | `pg_constraint` (`contype = 'c'`) | `sys.check_constraints` |
 
 Reihenfolge der Umsetzung: **MySQL → PostgreSQL → SQL Server.**
 Der zweite Adapter prüft, ob das neutrale Modell trägt.
@@ -269,8 +272,8 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
   - [x] Ältere Diagrammdateien: MySQL-Datenbanken mit MariaDB-Serverversion werden beim
         Laden zu MariaDB; Verbindungsprofile bleiben (Passwort im Tresor hängt am Dialekt)
   - [x] Tests: `tests/test_mariadb.py`, Live-Tests und Roundtrip mit MariaDB-Profil
-  - [ ] Später, bei Bedarf: Unterschiede im SQL-Export (z. B. `json` ↔ `longtext` mit
-        `JSON_VALID`-Prüfung, die beim Einlesen nicht erhalten bleibt)
+  - [ ] Später, bei Bedarf: Unterschiede im SQL-Export (z. B. `json` ↔ `longtext`).
+        Die `JSON_VALID`-Prüfung bleibt seit den CHECK-Constraints als Check erhalten
 - [x] Notizen (Infoboxen): frei oder mit einer Tabelle verbunden, verschieben, Größe ändern,
       Doppelklick bearbeitet, Kontextmenüs (Tabelle, Notiz, freie Fläche), Entf löscht;
       gehören zum Layout der jeweiligen Ansicht (je Teildiagramm eigene Notizen)
@@ -292,6 +295,21 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       geparkt und beim Abwählen von „Auto“ zurückgeholt, z. B. `nextval(...)`), bei PK
       erlaubt (UUID-Schlüssel mit `gen_random_uuid()`/`NEWID()`/`UUID()`), Default `NULL`
       bei NOT-NULL-Spalte wird abgelehnt; Tooltip mit Beispielen an der Spaltenüberschrift
+- [x] CHECK-Constraints (2026-11-24):
+  - [x] Modell `CheckConstraint` (Name, Ausdruck, Spalten) an der Tabelle, Speichern/Laden;
+        `model/checks.py` findet/benennt Spalten im Ausdruck (Zeichenketten, Funktionen,
+        Casts ausgenommen); Umbenennen zieht Ausdrücke nach, gelöschte Spalten entfernen Checks
+  - [x] Tabelleneditor: Spalte „Check“ (Checks einer Spalte, Name wird vorgeschlagen:
+        `<tabelle>_<spalte>_check`) und Reiter „Checks“ (mehrere oder keine Spalte)
+  - [x] Tooltip der Spalte listet alle Checks, die sie benutzen
+  - [x] SQL-Export: `CONSTRAINT … CHECK (…)` im `CREATE TABLE`, Namen je Schema eindeutig,
+        bei MySQL Hinweis „wirkt erst ab 8.0.16“
+  - [x] Einlesen aller vier Dialekte; Ausdruck aufgeräumt (`CHECK`, äußere Klammern,
+        `NOT VALID`, MySQL-Zeichensatz-Präfixe und escapte Hochkommas). PostgreSQL schreibt
+        `IN (…)` als `= ANY (ARRAY[…])` und nach erneutem Einlesen gleichbedeutend um
+  - [x] Tests: `tests/test_checks.py`, live `tests/test_checks_live.py` (eigene Datenbanken
+        `erd_test_checks`/`_copy`, werden wieder gelöscht)
+  - [ ] Später, bei Bedarf: Checks in der Box sichtbar machen (Symbol/Anzeigeoption)
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
 - [ ] n:m-Zwischentabellen optional als eine Linie

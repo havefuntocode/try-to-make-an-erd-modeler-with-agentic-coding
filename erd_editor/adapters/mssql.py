@@ -36,6 +36,7 @@ from erd_editor.model import (
     TableKind,
     TableRef,
 )
+from erd_editor.model.checks import add_check
 
 Row = Mapping[str, Any]
 
@@ -171,6 +172,18 @@ SQL_FOREIGN_KEYS = """
     ORDER BY s.name, t.name, fk.name, fkc.constraint_column_id
 """
 
+SQL_CHECKS = """
+    SELECT s.name  AS schema_name,
+           t.name  AS table_name,
+           cc.name AS constraint_name,
+           cc.definition AS expression
+    FROM sys.check_constraints cc
+    JOIN sys.tables t  ON t.object_id = cc.parent_object_id
+    JOIN sys.schemas s ON s.schema_id = t.schema_id
+    WHERE t.is_ms_shipped = 0
+    ORDER BY s.name, t.name, cc.name
+"""
+
 _LENGTH_TYPES = {"char", "varchar", "binary", "varbinary"}
 _UNICODE_TYPES = {"nchar", "nvarchar"}  # max_length in Bytes, 2 je Zeichen
 _PRECISION_SCALE_TYPES = {"decimal", "numeric"}
@@ -273,6 +286,7 @@ def build_database(
     indexes: Iterable[Row],
     foreign_keys: Iterable[Row],
     view_usage: Iterable[Row] = (),
+    checks: Iterable[Row] = (),
     collation: str | None = None,
     server_version: str | None = None,
     connection_profile: str | None = None,
@@ -335,6 +349,11 @@ def build_database(
                 on_delete=_rule(first["delete_rule"]),
             )
         )
+
+    for row in checks:
+        t = table(row)
+        if t is not None and not t.is_view:
+            add_check(t, row["constraint_name"], _text(row["expression"]) or "")
 
     for row in view_usage:
         view = table({"schema_name": row["schema_name"], "table_name": row["view_name"]})
@@ -445,6 +464,7 @@ class MssqlAdapter(SchemaAdapter):
                 indexes=self._query(conn, SQL_INDEXES),
                 foreign_keys=self._query(conn, SQL_FOREIGN_KEYS),
                 view_usage=self._query(conn, SQL_VIEW_USAGE),
+                checks=self._query(conn, SQL_CHECKS),
                 collation=_text(info["collation"]),
                 server_version=product_version(_text(version)),
                 connection_profile=self.profile.name,
