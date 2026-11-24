@@ -3,6 +3,7 @@
 from erd_editor.model.layout import ColumnMode, DisplayOptions, Layout, Note
 from erd_editor.model.subdiagram import Subdiagram, filter_diagram
 from erd_editor.model.schema import (
+    CheckConstraint,
     Column,
     ConnectionProfile,
     Database,
@@ -18,6 +19,7 @@ from erd_editor.model.schema import (
 )
 
 __all__ = [
+    "CheckConstraint",
     "Column",
     "ColumnMode",
     "ConnectionProfile",

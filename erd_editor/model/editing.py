@@ -14,7 +14,8 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, replace
 
-from erd_editor.model.schema import Column, Database, Diagram, Dialect, ForeignKey, Index, IndexKind, Schema, Table, TableRef
+from erd_editor.model.checks import rename_in_expression
+from erd_editor.model.schema import CheckConstraint, Column, Database, Diagram, Dialect, ForeignKey, Index, IndexKind, Schema, Table, TableRef
 from erd_editor.model.types import DEFAULT_SCHEMAS
 
 
@@ -95,9 +96,10 @@ def replace_table(
     alte auf neue Spaltennamen ab. Spalten, die es in `table` nicht mehr
     gibt, gelten als gelöscht: Indexe und Fremdschlüssel mit diesen
     Spalten entfallen – auch Fremdschlüssel anderer Tabellen, die auf sie zeigen.
+    Checks werden ebenso behandelt (Spaltennamen im Ausdruck umbenannt).
 
-    `final_indexes=True`: `table.indexes` nennen bereits die neuen
-    Spaltennamen (Tabelleneditor) und werden nicht umbenannt, nur geprüft.
+    `final_indexes=True`: `table.indexes` und `table.checks` nennen bereits die
+    neuen Spaltennamen (Tabelleneditor) und werden nicht umbenannt, nur geprüft.
     """
     if not is_editable(diagram, ref.database):
         raise EditError(f"Datenbank {ref.database!r} ist eingelesen und schreibgeschützt")
@@ -129,8 +131,12 @@ def replace_table(
         index_names = [i.name for i in edited.indexes]
         if len(index_names) != len(set(index_names)):
             raise EditError("Indexnamen müssen eindeutig sein")
+        for check in edited.checks:
+            if unknown := [c for c in check.columns if c not in present]:
+                raise EditError(f"Check {check.name!r} nennt unbekannte Spalten: {', '.join(unknown)}")
     else:
         edited.indexes = _remap_indexes(edited.indexes, map_own)
+        edited.checks = _remap_checks(edited.checks, map_own, renames)
     edited.foreign_keys = _remap_fks(edited.foreign_keys, map_own)
     # Selbstreferenzen zeigen ggf. auf den neuen Namen
     for fk in edited.foreign_keys:
@@ -180,6 +186,17 @@ def _remap_indexes(indexes: list[Index], mapping) -> list[Index]:
         cols = tuple(mapping(c) for c in index.columns)
         if all(c is not None for c in cols):
             result.append(replace(index, columns=cols))
+    return result
+
+
+def _remap_checks(checks: list[CheckConstraint], mapping, renames: dict[str, str]) -> list[CheckConstraint]:
+    """Checks mit gelöschten Spalten entfallen; umbenannte Spalten auch im Ausdruck."""
+    result = []
+    for check in checks:
+        cols = tuple(mapping(c) for c in check.columns)
+        if all(c is not None for c in cols):
+            used = {old: new for old, new in renames.items() if old in check.columns and old != new}
+            result.append(replace(check, columns=cols, expression=rename_in_expression(check.expression, used)))
     return result
 
 
@@ -309,4 +326,5 @@ def delete_relationship(diagram: Diagram, child: TableRef, fk_name: str, drop_co
             if remaining and (index.kind is IndexKind.PRIMARY or remaining == index.columns):
                 kept.append(replace(index, columns=remaining))
         table.indexes = kept
+        table.checks = [c for c in table.checks if not drop & set(c.columns)]
     return new

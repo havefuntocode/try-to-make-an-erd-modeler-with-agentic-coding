@@ -132,6 +132,21 @@ class ForeignKey:
 
 
 @dataclass
+class CheckConstraint:
+    """CHECK-Constraint einer Tabelle.
+
+    `expression` ist der native SQL-Ausdruck ohne `CHECK (…)`. `columns` sind
+    die Spalten, die er benutzt: genau eine → in der Oberfläche ein Check
+    „an der Spalte“. Datenbanken speichern Spalten- und Tabellen-Checks
+    gleich, daher gibt es im Modell nur diese eine Form.
+    """
+
+    name: str
+    expression: str
+    columns: tuple[str, ...] = ()
+
+
+@dataclass
 class Table:
     """Tabelle mit Spalten, Indexen und ausgehenden Fremdschlüsseln – oder eine View.
 
@@ -149,6 +164,7 @@ class Table:
     kind: TableKind = TableKind.TABLE
     definition: str | None = None
     view_dependencies: list[TableRef] = field(default_factory=list)
+    checks: list[CheckConstraint] = field(default_factory=list)
 
     @property
     def is_view(self) -> bool:
@@ -172,6 +188,10 @@ class Table:
 
     def is_foreign_key_column(self, name: str) -> bool:
         return any(name in fk.columns for fk in self.foreign_keys)
+
+    def column_checks(self, name: str) -> list[CheckConstraint]:
+        """Checks, die nur diese eine Spalte betreffen."""
+        return [c for c in self.checks if c.columns == (name,)]
 
     def is_indexed_column(self, name: str) -> bool:
         """True, wenn die Spalte in irgendeinem Index vorkommt (inkl. PK)."""
@@ -268,6 +288,10 @@ class Diagram:
                 for col in index.columns:
                     if col not in known:
                         problems.append(f"{ref}: Index {index.name!r} nennt unbekannte Spalte {col!r}")
+            for check in table.checks:
+                for col in check.columns:
+                    if col not in known:
+                        problems.append(f"{ref}: Check {check.name!r} nennt unbekannte Spalte {col!r}")
             if sum(1 for i in table.indexes if i.kind is IndexKind.PRIMARY) > 1:
                 problems.append(f"{ref}: mehr als ein Primärschlüssel")
 

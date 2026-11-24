@@ -25,6 +25,7 @@ from typing import Any
 from erd_editor.analysis.overrides import RelationshipKey, RelationshipOverride
 from erd_editor.model.layout import MAX_SCALE, MIN_SCALE, ColumnMode, DisplayOptions, Frame, Note
 from erd_editor.model import (
+    CheckConstraint,
     Column,
     ConnectionProfile,
     Database,
@@ -197,6 +198,8 @@ def _database_from_dict(d: dict[str, Any]) -> Database:
 
 def _table_to_dict(t: Table) -> dict[str, Any]:
     data = _table_body_to_dict(t)
+    if t.checks:  # nur wenn vorhanden, damit Dateien ohne Checks unverändert bleiben
+        data["checks"] = [{"name": c.name, "expression": c.expression, "columns": list(c.columns)} for c in t.checks]
     if t.is_view:  # nur bei Views, damit Dateien ohne Views unverändert bleiben
         data["kind"] = t.kind.value
         data["definition"] = t.definition
@@ -264,6 +267,7 @@ def _table_from_dict(d: dict[str, Any]) -> Table:
             )
             for fk in d.get("foreign_keys", [])
         ],
+        checks=[CheckConstraint(c["name"], c["expression"], tuple(c.get("columns", []))) for c in d.get("checks", [])],
     )
 
 
