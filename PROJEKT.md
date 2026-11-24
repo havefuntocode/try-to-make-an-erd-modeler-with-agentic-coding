@@ -315,6 +315,17 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
   - [x] Tests: `tests/test_checks.py`, live `tests/test_checks_live.py` (eigene Datenbanken
         `erd_test_checks`/`_copy`, werden wieder gelöscht)
   - [x] In der Box sichtbar: Häkchen-Symbol je Spalte, Option „Checks im Indexbereich“
+- [x] Neues Diagramm beginnt immer mit einer Modell-Datenbank (2026-11-24): Datei → Neu fragt
+      Name, Dialekt und Schema ab („Neues Diagramm“); Abbrechen bricht „Neu“ ganz ab, das
+      bisherige Diagramm bleibt. Der zuletzt gewählte Dialekt wird vorbelegt (QSettings
+      `model/dialect`). Neue Tabelle/View/Beziehung sind nie ausgegraut: ohne Modell-Datenbank
+      fragt das Programm, ob es eine anlegen soll, und macht danach direkt weiter.
+      Tests: ungeplante modale Dialoge lassen einen Test scheitern statt hängen (`conftest.py`)
+- [ ] Datenbank umbenennen (Doppelklick auf die Rahmen-Kopfzeile): Name in allen Verweisen
+      nachziehen (Tabellenverweise, FKs, Positionen, Farben, Rahmen, Teildiagramme,
+      Notiz-Verbindungen, Linien-Überschreibungen). Dialektwechsel bewusst nicht
+- [ ] Klären: Michael hatte eine Box ohne DB-Rahmen, die nicht bearbeitbar war
+      (Weg unbekannt; laut Code bekommt jede Datenbank einen Rahmen)
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
 - [ ] n:m-Zwischentabellen optional als eine Linie

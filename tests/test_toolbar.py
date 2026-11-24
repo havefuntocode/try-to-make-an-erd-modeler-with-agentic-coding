@@ -50,7 +50,8 @@ def test_tooltips_show_shortcut(window):
 
 def test_states_follow_document(window):
     a = window.named_actions
-    assert not a["new_table"].isEnabled() and not a["relation_tool"].isEnabled()
+    # Modellier-Aktionen bleiben anklickbar (ohne Modell-Datenbank wird nachgefragt)
+    assert a["new_table"].isEnabled() and a["relation_tool"].isEnabled()
     assert not a["export_sql"].isEnabled() and not a["reload"].isEnabled()
     assert a["new_database"].isEnabled() and a["open"].isEnabled()
     window.create_database("lager", Dialect.MYSQL)
@@ -61,7 +62,7 @@ def test_states_follow_document(window):
     assert a["auto_layout"].isEnabled()
     window.undo_stack.undo()
     window.undo_stack.undo()
-    assert not a["new_table"].isEnabled()  # auch nach Rückgängig richtig
+    assert not a["export_sql"].isEnabled()  # auch nach Rückgängig richtig
 
 
 def test_relation_tool_button_follows_mode(window):
@@ -76,9 +77,12 @@ def test_relation_tool_button_follows_mode(window):
     assert not window.view.relation_mode
 
 
-def test_relation_tool_refused_without_model_releases_button(window):
+def test_relation_tool_refused_without_model_releases_button(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     action = window.named_actions["relation_tool"]
-    window.toggle_relation_tool(True)  # ohne Modell-Datenbank
+    window.toggle_relation_tool(True)  # ohne Modell-Datenbank, Rückfrage mit Nein beantwortet
     assert not action.isChecked() and not window.view.relation_mode
 
 

@@ -16,6 +16,11 @@ from PySide6.QtWidgets import QMenu, QToolBar
 TOOLBAR_ICON_DIR = Path(__file__).resolve().parent.parent / "resources" / "toolbar"
 SETTINGS = ("ErdEditor", "ER-Diagramm-Editor")
 
+
+def app_settings() -> QSettings:
+    """Programmeinstellungen (in Tests auf eine temporäre INI-Datei umgelenkt)."""
+    return QSettings(*SETTINGS)
+
 # (Aktionsname, Icon); None = Trennstrich
 TOOLBAR_LAYOUT: list[tuple[str, str] | None] = [
     ("new", "new"), ("open", "open"), ("save", "save"), ("read_database", "db_read"), ("reload", "reload"),
@@ -110,11 +115,12 @@ class ToolbarMixin:
             return
         diagram = self.document.diagram
         has_content = bool(diagram.databases)
-        editable = bool(self.editable_targets())
         reloadable = any(db.connection_profile and self.document.connection(db.connection_profile)
                          for db in diagram.databases)
         states = {
-            "new_table": editable, "new_view": editable, "relation_tool": editable,
+            # Modellier-Aktionen immer anklickbar: ohne Modell-Datenbank bietet
+            # `_choose_target` an, gleich eine anzulegen (statt still ausgegraut zu sein)
+            "new_table": True, "new_view": True, "relation_tool": True,
             "reload": reloadable, "export_pdf": has_content, "export_sql": has_content,
             "auto_layout": bool(self.scene.entities), "add_note": has_content,
         }

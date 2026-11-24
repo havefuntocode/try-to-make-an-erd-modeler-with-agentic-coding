@@ -199,3 +199,22 @@ def _settings_in_tmp(monkeypatch, tmp_path):
 
     ini = str(tmp_path / "settings.ini")
     monkeypatch.setattr(toolbar, "QSettings", lambda *a: QSettings(ini, QSettings.Format.IniFormat))
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_dialogs(monkeypatch):
+    """Modale Dialoge, die ein Test nicht selbst ersetzt, lassen ihn scheitern statt hängen.
+
+    Tests ersetzen `exec` der jeweiligen Dialogklasse bzw. `QMessageBox.question` & Co.
+    selbst – das hat Vorrang vor dieser Sicherung.
+    """
+    from PySide6.QtWidgets import QDialog, QMessageBox
+
+    def blocked(name):
+        def fail(*_args, **_kwargs):
+            raise AssertionError(f"Modaler Dialog im Test nicht ersetzt: {name}")
+        return fail
+
+    monkeypatch.setattr(QDialog, "exec", blocked("QDialog.exec"))
+    for name in ("question", "information", "warning", "critical"):
+        monkeypatch.setattr(QMessageBox, name, blocked(f"QMessageBox.{name}"))

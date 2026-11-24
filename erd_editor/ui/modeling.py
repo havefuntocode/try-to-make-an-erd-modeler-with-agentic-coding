@@ -37,6 +37,7 @@ from erd_editor.model.types import DEFAULT_SCHEMAS
 from erd_editor.persistence.document import DiagramDocument
 from erd_editor.ui.relationship_dialog import RelationshipDialog
 from erd_editor.ui.table_dialog import TableDialog
+from erd_editor.ui.toolbar import app_settings
 from erd_editor.ui.view_dialog import ViewDialog
 
 READ_ONLY_HINT = (
@@ -48,9 +49,11 @@ READ_ONLY_HINT = (
 class DatabaseDialog(QDialog):
     """Neue Modell-Datenbank: Name, Dialekt, Schema."""
 
-    def __init__(self, taken: set[str], parent: QWidget | None = None) -> None:
+    def __init__(self, taken: set[str], parent: QWidget | None = None, title: str = "Neue Datenbank (Modell)",
+                 intro: str = "") -> None:
         super().__init__(parent)
-        self.setWindowTitle("Neue Datenbank (Modell)")
+        self.setWindowTitle(title)
+        self.setMinimumWidth(400)
         self._taken = taken
         self.name = QLineEdit()
         self.name.setPlaceholderText("z. B. shop")
@@ -65,6 +68,10 @@ class DatabaseDialog(QDialog):
         self.box.accepted.connect(self.accept)
         self.box.rejected.connect(self.reject)
         form = QFormLayout(self)
+        if intro:
+            label = QLabel(intro)
+            label.setWordWrap(True)
+            form.addRow(label)
         form.addRow("Name:", self.name)
         form.addRow("Dialekt:", self.dialect)
         form.addRow("Schema:", self.schema)
@@ -72,7 +79,15 @@ class DatabaseDialog(QDialog):
         form.addRow(self.box)
         self.name.textChanged.connect(self._validate)
         self.dialect.currentIndexChanged.connect(self._dialect_changed)
+        # zuletzt gewählter Dialekt als Vorbelegung
+        last = self.dialect.findData(str(app_settings().value("model/dialect", Dialect.MYSQL.value)))
+        if last >= 0:
+            self.dialect.setCurrentIndex(last)
         self._dialect_changed()
+
+    def accept(self) -> None:
+        app_settings().setValue("model/dialect", self.chosen_dialect().value)
+        super().accept()
 
     def chosen_dialect(self) -> Dialect:
         return Dialect(self.dialect.currentData())
@@ -96,15 +111,26 @@ class ModelingMixin:
     # ------------------------------------------------------------------ Datei → Neu
 
     def new_document(self) -> None:
-        """Leeres Diagramm; anschließend gleich eine Datenbank anlegen."""
+        """Neues Diagramm mit einer ersten Modell-Datenbank (Name und Dialekt im Dialog).
+
+        Abbrechen bricht „Neu“ ganz ab – das bisherige Diagramm bleibt offen,
+        ein leeres Diagramm ohne Datenbank entsteht nicht.
+        """
         if not self._confirm_discard():
+            return
+        dialog = DatabaseDialog(set(), self, "Neues Diagramm",
+                                "Das Diagramm beginnt mit einer Modell-Datenbank. Name und Dialekt "
+                                "bestimmen Datentypen und SQL-Export.")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self.statusBar().showMessage("Neues Diagramm abgebrochen")
             return
         self.path = None
         self.show_document(DiagramDocument(), use_layout=False)
+        self.create_database(dialog.name.text().strip(), dialog.chosen_dialect(), dialog.schema.text().strip() or None)
+        self.undo_stack.clear()  # die erste Datenbank gehört zum neuen Diagramm, nicht rückgängig zu machen
         self._update_title()
         self.setWindowModified(False)
-        self.statusBar().showMessage("Neues Diagramm – Modell → Neue Datenbank … oder Datei → Datenbank einlesen …")
-        self.new_database_dialog()
+        self.statusBar().showMessage("Neues Diagramm – Modell → Neue Tabelle … (Strg+Umschalt+N)")
 
     # ------------------------------------------------------------------ Änderungen anwenden
 
@@ -155,11 +181,22 @@ class ModelingMixin:
 
     # ------------------------------------------------------------------ Datenbanken
 
-    def new_database_dialog(self) -> None:
+    def new_database_dialog(self) -> bool:
+        """Modell → Neue Datenbank …; True, wenn eine angelegt wurde."""
         dialog = DatabaseDialog({db.name for db in self.document.diagram.databases}, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
+            return False
+        before = len(self.document.diagram.databases)
         self.create_database(dialog.name.text().strip(), dialog.chosen_dialect(), dialog.schema.text().strip() or None)
+        return len(self.document.diagram.databases) > before
+
+    def offer_new_database(self, purpose: str) -> bool:
+        """Keine Modell-Datenbank da: fragen, ob gleich eine angelegt werden soll."""
+        reason = " – eingelesene Datenbanken sind schreibgeschützt" if self.document.diagram.databases else ""
+        answer = QMessageBox.question(
+            self, "Keine Modell-Datenbank",
+            f"{purpose} braucht eine Modell-Datenbank{reason}.\n\nJetzt eine neue Datenbank anlegen?")
+        return answer == QMessageBox.StandardButton.Yes and self.new_database_dialog()
 
     def create_database(self, name: str, dialect: Dialect, schema: str | None = None) -> None:
         diagram = self._try(lambda: add_database(self.document.diagram, name, dialect, schema))
@@ -187,11 +224,14 @@ class ModelingMixin:
         """(Datenbank, Schema) aller bearbeitbaren Orte."""
         return [(db.name, s.name) for db in self.document.diagram.databases if db.modeled for s in db.schemas]
 
-    def _choose_target(self) -> tuple[str, str | None] | None:
+    def _choose_target(self, purpose: str = "Eine neue Tabelle") -> tuple[str, str | None] | None:
         targets = self.editable_targets()
         if not targets:
-            self.statusBar().showMessage("Keine Modell-Datenbank – zuerst Modell → Neue Datenbank … anlegen")
-            return None
+            if not self.offer_new_database(purpose):
+                return None
+            targets = self.editable_targets()
+            if not targets:
+                return None
         # bevorzugt die Datenbank der markierten Tabelle
         for ref in self.selected_refs():
             if (ref.database, ref.schema) in targets:
@@ -228,7 +268,7 @@ class ModelingMixin:
 
     def new_view_dialog(self) -> None:
         """Modell → Neue View …"""
-        target = self._choose_target()
+        target = self._choose_target("Eine neue View")
         if target is None:
             return
         db_name, schema = target
@@ -292,7 +332,10 @@ class ModelingMixin:
     def start_relation_tool(self) -> None:
         """Modell → Beziehung zeichnen: von der Kind- zur Elterntabelle ziehen."""
         if not self.editable_targets():
-            self.statusBar().showMessage("Keine Modell-Datenbank – Beziehungen lassen sich nur in Modellen anlegen")
+            # Eine neue Datenbank ist leer – Beziehungen brauchen erst Tabellen
+            if self.offer_new_database("Eine Beziehung"):
+                self.statusBar().showMessage("Datenbank angelegt – jetzt Tabellen anlegen (Strg+Umschalt+N), "
+                                             "dann Beziehungen zeichnen")
             return
         self.view.set_relation_mode(True)
         self.statusBar().showMessage("Beziehung zeichnen: auf die Kindtabelle drücken und zur Elterntabelle ziehen (Esc bricht ab)")

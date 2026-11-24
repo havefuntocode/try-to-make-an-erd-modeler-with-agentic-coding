@@ -227,11 +227,73 @@ def test_save_and_open_model(modeled, tmp_path):
     other.close()
 
 
+def fake_database_dialog(monkeypatch, name: str | None, dialect: Dialect = Dialect.MYSQL):
+    """DatabaseDialog.exec ersetzen: Name/Dialekt eintragen und bestätigen (name=None: Abbrechen)."""
+    from PySide6.QtWidgets import QDialog
+
+    from erd_editor.ui import modeling
+
+    def exec_(dialog):
+        if name is None:
+            dialog.reject()
+            return QDialog.DialogCode.Rejected
+        dialog.dialect.setCurrentIndex(dialog.dialect.findData(dialect.value))
+        dialog.name.setText(name)
+        dialog.accept()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(modeling.DatabaseDialog, "exec", exec_)
+
+
 def test_new_document(window, test_schema, monkeypatch):
     window.load_diagram(test_schema)
     window.setWindowModified(False)
-    monkeypatch.setattr(window, "new_database_dialog", lambda: None)
+    fake_database_dialog(monkeypatch, "lager", Dialect.POSTGRESQL)
     window.new_document()
-    assert window.document.diagram.databases == []
+    db = window.document.diagram.databases
+    assert [(d.name, d.dialect, d.modeled) for d in db] == [("lager", Dialect.POSTGRESQL, True)]
+    assert [s.name for s in db[0].schemas] == ["public"]
     assert window.scene.entities == {}
+    assert "lager" in window.scene.containers  # Rahmen sofort da
     assert window.windowTitle().startswith("Unbenannt")
+    assert not window.isWindowModified() and not window.undo_stack.canUndo()
+    # der Dialekt wird für das nächste Mal vorbelegt
+    from erd_editor.ui.modeling import DatabaseDialog
+
+    assert DatabaseDialog(set()).chosen_dialect() is Dialect.POSTGRESQL
+
+
+def test_new_document_cancel_keeps_current(window, test_schema, monkeypatch):
+    window.load_diagram(test_schema)
+    window.setWindowModified(False)
+    before = [d.name for d in window.document.diagram.databases]
+    fake_database_dialog(monkeypatch, None)
+    window.new_document()
+    assert [d.name for d in window.document.diagram.databases] == before
+
+
+@pytest.mark.parametrize("answer", ["no", "yes"])
+def test_new_table_without_model_database_offers_one(window, monkeypatch, answer):
+    from PySide6.QtWidgets import QDialog, QMessageBox
+
+    asked = []
+
+    def question(*args, **kwargs):
+        asked.append(args[2])
+        return QMessageBox.StandardButton.Yes if answer == "yes" else QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(QMessageBox, "question", question)
+    fake_database_dialog(monkeypatch, "lager")
+
+    def table_exec(dialog):
+        dialog.name.setText("regal")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(TableDialog, "exec", table_exec)
+    assert window.named_actions["new_table"].isEnabled()
+    window.new_table_dialog()
+    assert "Modell-Datenbank" in asked[0] and "schreibgeschützt" not in asked[0]
+    if answer == "yes":
+        assert ref("regal") in window.scene.entities  # Datenbank angelegt, Tabelle gleich hinterher
+    else:
+        assert window.document.diagram.databases == []

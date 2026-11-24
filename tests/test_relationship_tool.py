@@ -97,14 +97,19 @@ class TestDrawing:
         window.on_relation_drawn(ref("fach"), ref("regal"))
         assert window.undo_stack.count() == count
 
-    def test_tool_needs_model_database(self, qapp, test_schema):
+    def test_tool_needs_model_database(self, qapp, test_schema, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+
         from erd_editor.main import MainWindow
 
+        asked = []
+        monkeypatch.setattr(QMessageBox, "question",
+                            lambda *a, **k: asked.append(a[2]) or QMessageBox.StandardButton.No)
         w = MainWindow()
         w.load_diagram(test_schema)
         w.start_relation_tool()
         assert not w.view.relation_mode
-        assert "Modell" in w.statusBar().currentMessage()
+        assert "Modell-Datenbank" in asked[0] and "schreibgeschützt" in asked[0]
         w.setWindowModified(False)
         w.close()
 
