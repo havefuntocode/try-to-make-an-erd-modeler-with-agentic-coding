@@ -348,6 +348,10 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Spalten- und Tabellenkommentare
 - bei MySQL zusätzlich ein FK in eine zweite Datenbank
 
+CHECK-Constraints stehen bewusst **nicht** im Testschema: `tests/test_checks_live.py` legt je
+Server eigene Wegwerf-Datenbanken (`erd_test_checks`, `erd_test_checks_copy`) an und löscht sie
+wieder – so muss `erd_test_shop` nicht neu eingespielt werden.
+
 ## 12. Hinweise für die Entwicklung
 
 - Umgebung: `.venv` (Python 3.11), Projekt editierbar installiert (`pip install -e .`)
@@ -367,8 +371,9 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Dialekt-Auswahl in Tests über `findData(Dialect.X.value)`, nicht über die Listenposition
 - Spaltensymbole (`diagram/markers.py`, ohne Qt): `ColumnMarker(icon, extra)` mit
   `KeyIcon` (Hauptsymbol) und `ExtraIcon` (`indexed`, `unique`, `unique_part`; Wert =
-  SVG-Name in `resources/icons`), dazu `CheckIcon` (`check`, `check_part`) rechts. `column_index_notes()` liefert die Tooltip-Zeilen.
-  Neue Symbole: SVG anlegen und in `ExtraIcon` bzw. `KeyIcon` eintragen –
+  SVG-Name in `resources/icons`), dazu `CheckIcon` (`check`, `check_part`) in eigener
+  Spalte hinter dem Datentyp. `column_index_notes()` liefert die Tooltip-Zeilen.
+  Neue Symbole: SVG anlegen und in `ExtraIcon`, `KeyIcon` bzw. `CheckIcon` eintragen –
   `test_all_icons_are_valid_svg` prüft alle
 - SQL-Export (`export/ddl.py`): `generate_statements()` liefert die Anweisungen inkl. der
   Prüfungen (SQL Server: `IF DB_ID … SET NOEXEC ON`, PostgreSQL: `BEGIN`, `DO $$ … $$`,
@@ -394,16 +399,29 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Modelländerungen, Rückgängig und Neu einlesen laufen über `show_view(..., keep_view=True)`
   → `DiagramScene.update_diagram()`; nur bei geänderten Datenbanken/Schemas/Farben/
   Darstellungsgröße wird über `load()` komplett neu aufgebaut
-- Der Tabelleneditor liefert Indexe mit den **neuen** Spaltennamen
+- Der Tabelleneditor liefert Indexe **und Checks** mit den **neuen** Spaltennamen
   (`replace_table(..., final_indexes=True)`), Fremdschlüssel mit den alten
+- CHECK-Constraints: Ausdruck ist nativer SQL-Text, `CheckConstraint.columns` wird immer aus
+  dem Ausdruck berechnet (`model/checks.py`: `expression_columns`, `rename_in_expression`,
+  `clean_check_expression`, `add_check` für die Adapter). Genau eine Spalte → Spalte „Check“
+  im Tabelleneditor und gefülltes Häkchen; sonst Reiter „Checks“ und leeres Häkchen
+- Default-Werte im Tabelleneditor: bei Auto-Increment gesperrt (Wert wird in der Zelle
+  geparkt, Rolle `PARKED`), bei PK erlaubt (UUID-Schlüssel)
 
 - Symbolleiste (`ui/toolbar.py`): nutzt dieselben `QAction`s wie die Menüs
   (`named_actions`, beim Menübau über `_named()` gemerkt); Zustände in `_sync_toolbar()`,
   aufgerufen aus `_sync_menus()`. Icons in `resources/toolbar/*.svg`, erzeugt mit
   `tools/make_toolbar_icons.py` (Farben/Formen dort ändern, dann neu erzeugen)
-- Einstellungen (z. B. Darstellung der Symbolleiste) über `QSettings` in der Registry
-  (`HKCU\Software\ErdEditor`); Tests leiten sie per `conftest._settings_in_tmp` in eine
+- Einstellungen (z. B. Darstellung der Symbolleiste, zuletzt gewählter Dialekt
+  `model/dialect`) über `QSettings` in der Registry (`HKCU\Software\ErdEditor`), immer über
+  `toolbar.app_settings()`; Tests leiten sie per `conftest._settings_in_tmp` in eine
   temporäre INI-Datei um
+- `conftest._no_modal_dialogs` (autouse): `QDialog.exec` und `QMessageBox.question/
+  information/warning/critical` werfen im Test einen Fehler, statt modal zu warten. Tests,
+  die einen Dialog brauchen, ersetzen `exec` der jeweiligen Dialogklasse bzw. die
+  `QMessageBox`-Funktion selbst (Beispiel: `fake_database_dialog` in `tests/test_modeling.py`)
+- Datei → Neu öffnet `DatabaseDialog` mit Titel „Neues Diagramm“; Abbrechen ändert nichts.
+  Ohne Modell-Datenbank führen Neue Tabelle/View/Beziehung über `offer_new_database()`
 
 ### Anwendungssymbol und späterer Build
 
@@ -421,6 +439,21 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
   ```
 
 ## 13. Offene Punkte
+
+### Stand 2026-11-24
+
+Version 1–3 und die Punkte unter „Später“ bis auf die offenen sind fertig. Zuletzt dazugekommen:
+Default-Regeln im Tabelleneditor, CHECK-Constraints (Modell, Editor, Export, Einlesen aller vier
+Dialekte, Anzeige in der Box) und „Neues Diagramm beginnt mit einer Modell-Datenbank“.
+675 Tests, alle grün, auch live gegen MySQL 8.4, MariaDB 13, PostgreSQL und SQL Server.
+
+Nächste Kandidaten (Abschnitt 10, „Später“):
+- Datenbank umbenennen (Doppelklick auf die Rahmen-Kopfzeile)
+- Klären: Box ohne DB-Rahmen, nicht bearbeitbar (Weg unbekannt)
+- UNIQUE-Häkchen direkt an der Spalte im Tabelleneditor, gefilterte eindeutige Indexe
+- Programm legt eine neue Datenbank selbst an (Variante 2, noch nicht entschieden)
+
+### Entscheidungen und Rahmen
 
 - Endgültiger Projektname
 - Sprache der Oberfläche (Deutsch, später mehrsprachig?) – Code-Bezeichner: Englisch, Kommentare: Deutsch (entschieden)
