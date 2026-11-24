@@ -34,6 +34,7 @@ class DisplayOptions:
     show_types: bool = True
     show_indexes: bool = True
     show_comments: bool = False
+    show_checks: bool = False  # CHECK-Constraints im unteren Bereich der Box
 
 
 @dataclass(frozen=True)

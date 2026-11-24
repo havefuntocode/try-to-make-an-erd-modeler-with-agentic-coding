@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from erd_editor.model import Column, Index, IndexKind, Table
+from erd_editor.model import CheckConstraint, Column, Index, IndexKind, Table
 
 
 class KeyIcon(str, Enum):
@@ -31,6 +31,30 @@ class ExtraIcon(str, Enum):
 
 
 INDEXED_ICON = ExtraIcon.INDEXED.value
+
+
+class CheckIcon(str, Enum):
+    """Symbol am rechten Zeilenende für CHECK-Constraints; Wert = Dateiname ohne .svg.
+
+    Gefüllt = ein Check nur für diese Spalte, leer = Teil eines Checks über mehrere Spalten.
+    """
+
+    CHECK = "check"
+    CHECK_PART = "check_part"
+
+
+def column_check_icon(table: Table, column: Column) -> CheckIcon | None:
+    """Check-Symbol einer Spalte: eigener Check hat Vorrang vor „Teil eines Checks“."""
+    if table.column_checks(column.name):
+        return CheckIcon.CHECK
+    if any(column.name in c.columns for c in table.checks):
+        return CheckIcon.CHECK_PART
+    return None
+
+
+def check_label(check: CheckConstraint) -> tuple[str, str]:
+    """Beschriftung einer Check-Zeile im unteren Bereich: `("CHECK", "ck_preis: preis > 0")`."""
+    return "CHECK", f"{check.name}: {check.expression}"
 
 
 @dataclass(frozen=True)

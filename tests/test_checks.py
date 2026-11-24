@@ -271,3 +271,81 @@ def test_build_database_reads_checks_in_all_adapters():
         checks=[{"schema_name": "dbo", "table_name": "artikel", "constraint_name": "CK_x", "expression": "([preis]>(0))"}],
     )
     assert [(c.expression, c.columns) for c in ms.schemas[0].tables[0].checks] == [("[preis]>(0)", ("preis",))]
+
+
+# ---------------------------------------------------------------- Darstellung in der Box
+
+
+def test_column_check_icon():
+    from erd_editor.diagram.markers import CheckIcon, column_check_icon
+
+    t = table_with_checks()
+    assert [column_check_icon(t, c) for c in t.columns] == [None, CheckIcon.CHECK, CheckIcon.CHECK_PART]
+
+
+class TestBox:
+    def box(self, table, **options):
+        from erd_editor.diagram.entity_item import EntityItem
+        from erd_editor.model import DisplayOptions
+
+        return EntityItem(REF, table, options=DisplayOptions(**options))
+
+    def test_symbol_needs_room_only_with_checks(self, qapp):
+        t = table_with_checks()
+        plain = Table(t.name, t.columns)
+        with_checks, without = self.box(t), self.box(plain)
+        assert [r.check is not None for r in with_checks._columns] == [False, True, True]
+        assert without._check_w == 0
+        assert with_checks._check_w > 0
+        # Symbol liegt hinter den Datentypen und innerhalb der Box
+        s = with_checks.style
+        assert with_checks._check_x + s.marker_size <= with_checks.rect.width() - s.padding
+
+    def test_checks_in_index_area_only_when_switched_on(self, qapp):
+        from PySide6.QtCore import QPointF
+
+        t = table_with_checks()
+        assert self.box(t, show_indexes=False)._index_top is None
+        box = self.box(t, show_indexes=False, show_checks=True)
+        assert [(r.kind, r.label) for r in box._indexes] == [
+            ("CHECK", "artikel_preis_check: preis > 0"),
+            ("CHECK", "artikel_rabatt_check: rabatt < preis"),
+        ]
+        tip = box.tooltip_at(QPointF(10, box._indexes[1].top + 2))
+        assert "CHECK artikel_rabatt_check" in tip and "Spalten: rabatt, preis" in tip
+
+    def test_long_expression_is_elided(self, qapp):
+        t = table_with_checks()
+        t.checks[0].expression = "preis > 0 AND " * 40 + "preis < 1"
+        box = self.box(t, show_checks=True)
+        label = next(r.label for r in box._indexes if r.check is t.checks[0])
+        assert label.endswith("…")
+        tip_y = next(r.top for r in box._indexes if r.check is t.checks[0]) + 2
+        from PySide6.QtCore import QPointF
+
+        assert "preis &lt; 1" in box.tooltip_at(QPointF(10, tip_y))  # Tooltip zeigt den ganzen Ausdruck
+
+    def test_paint(self, qapp):
+        from PySide6.QtGui import QImage, QPainter
+
+        image = QImage(400, 300, QImage.Format.Format_ARGB32)
+        painter = QPainter(image)
+        self.box(table_with_checks(), show_checks=True).paint(painter, None)
+        painter.end()
+
+
+def test_show_checks_is_saved_and_in_menu(qapp, model):
+    from erd_editor.main import MainWindow
+    from erd_editor.model import DisplayOptions, Layout
+    from erd_editor.persistence.document import _layout_from_dict, _layout_to_dict
+
+    layout = Layout(display=DisplayOptions(show_checks=True))
+    assert _layout_from_dict(_layout_to_dict(layout)).display.show_checks
+    assert not _layout_from_dict({}).display.show_checks  # ältere Dateien: aus
+
+    w = MainWindow()
+    w.load_diagram(model)
+    w.option_actions["show_checks"].setChecked(True)
+    assert w.scene.display_options.show_checks
+    w.setWindowModified(False)
+    w.close()

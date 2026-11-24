@@ -1,7 +1,8 @@
 """Darstellung einer Tabelle als Box: Kopfzeile, Kommentar, Spaltenliste, Indexbereich.
 
 Was gezeigt wird, steuern die `DisplayOptions` (alle/nur Schlüssel-/keine
-Spalten, Datentypen, Indexbereich, Tabellenkommentar).
+Spalten, Datentypen, Indexbereich, Tabellenkommentar, Checks im Indexbereich).
+Spalten mit CHECK-Constraints tragen rechts ein Häkchen-Symbol.
 """
 
 from __future__ import annotations
@@ -20,11 +21,20 @@ from PySide6.QtWidgets import (
 )
 
 from erd_editor.diagram.icons import draw_icon
-from erd_editor.diagram.markers import ColumnMarker, column_index_notes, column_marker, index_label
+from erd_editor.diagram.markers import (
+    CheckIcon,
+    ColumnMarker,
+    check_label,
+    column_check_icon,
+    column_index_notes,
+    column_marker,
+    index_label,
+)
 from erd_editor.diagram.style import EntityStyle
-from erd_editor.model import Column, ColumnMode, DisplayOptions, Index, IndexKind, Table, TableRef
+from erd_editor.model import CheckConstraint, Column, ColumnMode, DisplayOptions, Index, IndexKind, Table, TableRef
 
 MAX_COMMENT_WIDTH = 280.0  # längere Tabellenkommentare werden gekürzt (…)
+MAX_CHECK_WIDTH = 320.0  # längere Check-Ausdrücke im Indexbereich werden gekürzt (…)
 MAX_TOOLTIP_COLUMNS = 25
 MAX_TOOLTIP_SQL = 600  # Zeichen des View-Texts im Tooltip
 VIEW_TAG = "VIEW"  # Kürzel rechts in der Kopfzeile einer View
@@ -36,14 +46,18 @@ class _ColumnRow:
     marker: ColumnMarker
     is_pk: bool
     top: float
+    check: CheckIcon | None = None
 
 
 @dataclass
 class _IndexRow:
-    index: Index
+    """Zeile im unteren Bereich: ein Index oder (mit `check`) ein CHECK-Constraint."""
+
+    index: Index | None
     kind: str
     label: str
     top: float
+    check: CheckConstraint | None = None
 
 
 def _activate(scene, ref: TableRef) -> None:
@@ -166,13 +180,17 @@ class EntityItem(QGraphicsObject):
         name_w = type_w = 0.0
         for col in shown:
             is_pk = self.table.is_primary_key_column(col.name)
-            self._columns.append(_ColumnRow(col, column_marker(self.table, col), is_pk, y))
+            self._columns.append(_ColumnRow(col, column_marker(self.table, col), is_pk, y,
+                                            column_check_icon(self.table, col)))
             name_w = max(name_w, (fm_pk if is_pk else fm_col).horizontalAdvance(col.name))
             if o.show_types:
                 type_w = max(type_w, fm_col.horizontalAdvance(col.data_type))
             y += self._row_h
         self._type_x = self._name_x + name_w + (s.type_gap if o.show_types else 0)
-        width = self._type_x + type_w + p if shown else 0.0
+        # Platz für das Check-Symbol am rechten Rand, nur wenn eine sichtbare Spalte eins hat
+        self._check_w = s.gap + s.marker_size if any(r.check for r in self._columns) else 0.0
+        self._check_x = self._type_x + type_w + s.gap  # eigene Spalte direkt hinter den Datentypen
+        width = self._type_x + type_w + self._check_w + p if shown else 0.0
 
         # Hinweis auf ausgeblendete Spalten
         self._more_top: float | None = None
@@ -188,15 +206,24 @@ class EntityItem(QGraphicsObject):
         self._index_top: float | None = None
         self._indexes: list[_IndexRow] = []
         self._index_row_h = fm_idx.height() + 2
-        if o.show_indexes and self.table.indexes:
+        indexes = self.table.indexes if o.show_indexes else []
+        checks = self.table.checks if o.show_checks else []
+        if indexes or checks:
             self._index_top = columns_bottom + p / 2
             y = self._index_top + p / 2
             kind_w = label_w = 0.0
-            # Primärschlüssel zuerst, sonst Reihenfolge der Datenbank
-            ordered = sorted(self.table.indexes, key=lambda i: i.kind is not IndexKind.PRIMARY)
+            # Primärschlüssel zuerst, sonst Reihenfolge der Datenbank; Checks danach
+            ordered = sorted(indexes, key=lambda i: i.kind is not IndexKind.PRIMARY)
             for index in ordered:
                 kind, label = index_label(index)
                 self._indexes.append(_IndexRow(index, kind, label, y))
+                kind_w = max(kind_w, fm_idx.horizontalAdvance(kind))
+                label_w = max(label_w, fm_idx.horizontalAdvance(label))
+                y += self._index_row_h
+            for check in checks:
+                kind, label = check_label(check)
+                label = fm_idx.elidedText(label, Qt.TextElideMode.ElideRight, MAX_CHECK_WIDTH)
+                self._indexes.append(_IndexRow(None, kind, label, y, check))
                 kind_w = max(kind_w, fm_idx.horizontalAdvance(kind))
                 label_w = max(label_w, fm_idx.horizontalAdvance(label))
                 y += self._index_row_h
@@ -304,6 +331,9 @@ class EntityItem(QGraphicsObject):
                 mx = p + s.icon_size + s.gap
                 my = row.top + (self._row_h - s.marker_size) / 2
                 draw_icon(painter, row.marker.extra.value, QRectF(mx, my, s.marker_size, s.marker_size))
+            if row.check is not None:
+                cy = row.top + (self._row_h - s.marker_size) / 2
+                draw_icon(painter, row.check.value, QRectF(self._check_x, cy, s.marker_size, s.marker_size))
             painter.setFont(s.pk_font if row.is_pk else s.column_font)
             painter.setPen(s.text)
             painter.drawText(QRectF(self._name_x, row.top, w - self._name_x - p, self._row_h), left, row.column.name)
@@ -362,6 +392,11 @@ class EntityItem(QGraphicsObject):
             if len(self._hidden) > MAX_TOOLTIP_COLUMNS:
                 names.append("…")
             return "<b>Ausgeblendet:</b><br>" + "<br>".join(names)
+        for row in self._indexes:
+            if row.check is not None and row.top <= y < row.top + self._index_row_h:
+                cols = ", ".join(row.check.columns) or "–"
+                return (f"<b>CHECK {escape(row.check.name)}</b><br>{escape(row.check.expression)}"
+                        f"<br>Spalten: {escape(cols)}")
         return ""
 
     def mouseDoubleClickEvent(self, event) -> None:

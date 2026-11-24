@@ -112,6 +112,11 @@ Der zweite Adapter prüft, ob das neutrale Modell trägt.
     Zusatzsymbol, außer sie haben zusätzlich einen eigenen einspaltigen UNIQUE-Index
   - Tooltip der Spalte listet ihre Indexe, z. B. „UNIQUE uq_code (code)“ oder
     „Teil von UNIQUE uq_termin (kunde_id, datum)“
+- CHECK (grünes Häkchen in eigener Spalte direkt hinter dem Datentyp; gefüllt/leer):
+  - **gefüllt:** es gibt einen Check nur für diese Spalte
+  - **leer:** Spalte ist Teil eines Checks über mehrere Spalten
+  - Option „Checks im Indexbereich“ (Ansicht, Standard aus, im Layout gespeichert):
+    `CHECK name: ausdruck` unter den Indexen, lange Ausdrücke gekürzt, Tooltip zeigt alles
 
 ### Datenbank als Behälter
 - Rechteck hinter den Entitäten, Kopfzeile mit Datenbankname, Server/Version, Zeichensatz
@@ -309,7 +314,7 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
         `IN (…)` als `= ANY (ARRAY[…])` und nach erneutem Einlesen gleichbedeutend um
   - [x] Tests: `tests/test_checks.py`, live `tests/test_checks_live.py` (eigene Datenbanken
         `erd_test_checks`/`_copy`, werden wieder gelöscht)
-  - [ ] Später, bei Bedarf: Checks in der Box sichtbar machen (Symbol/Anzeigeoption)
+  - [x] In der Box sichtbar: Häkchen-Symbol je Spalte, Option „Checks im Indexbereich“
 - [ ] Forward Engineering mit Typ-Mapping zwischen Dialekten
 - [ ] Mehrseitiger Druck (Poster) für große Diagramme
 - [ ] n:m-Zwischentabellen optional als eine Linie
@@ -351,7 +356,7 @@ Ein gemeinsames **Testschema**, das in MySQL, PostgreSQL und SQL Server eingespi
 - Dialekt-Auswahl in Tests über `findData(Dialect.X.value)`, nicht über die Listenposition
 - Spaltensymbole (`diagram/markers.py`, ohne Qt): `ColumnMarker(icon, extra)` mit
   `KeyIcon` (Hauptsymbol) und `ExtraIcon` (`indexed`, `unique`, `unique_part`; Wert =
-  SVG-Name in `resources/icons`). `column_index_notes()` liefert die Tooltip-Zeilen.
+  SVG-Name in `resources/icons`), dazu `CheckIcon` (`check`, `check_part`) rechts. `column_index_notes()` liefert die Tooltip-Zeilen.
   Neue Symbole: SVG anlegen und in `ExtraIcon` bzw. `KeyIcon` eintragen –
   `test_all_icons_are_valid_svg` prüft alle
 - SQL-Export (`export/ddl.py`): `generate_statements()` liefert die Anweisungen inkl. der

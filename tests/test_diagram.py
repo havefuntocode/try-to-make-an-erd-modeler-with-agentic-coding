@@ -87,7 +87,9 @@ class TestMarkers:
 
 
 def test_all_icons_are_valid_svg(qapp):
-    for name in [*(k.value for k in KeyIcon), *(e.value for e in ExtraIcon), INDEXED_ICON]:
+    from erd_editor.diagram.markers import CheckIcon
+
+    for name in [*(k.value for k in KeyIcon), *(e.value for e in ExtraIcon), *(c.value for c in CheckIcon), INDEXED_ICON]:
         assert (ICON_DIR / f"{name}.svg").exists()
         assert renderer(name).isValid()
 

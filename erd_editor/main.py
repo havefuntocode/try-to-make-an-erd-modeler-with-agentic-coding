@@ -261,6 +261,7 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
             ("show_types", "&Datentypen"),
             ("show_indexes", "&Indexbereich"),
             ("show_comments", "Tabellen&kommentare"),
+            ("show_checks", "&Checks im Indexbereich"),
         ]:
             action = QAction(text, self, checkable=True)
             action.toggled.connect(lambda checked, f=field: self.update_display_options(**{f: checked}))
@@ -271,7 +272,7 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
     # ------------------------------------------------------------------ Darstellungsoptionen
 
     def update_display_options(self, **changes) -> None:
-        """Einzelne Darstellungsoptionen ändern (columns, show_types, show_indexes, show_comments)."""
+        """Einzelne Darstellungsoptionen ändern (columns, show_types, show_indexes, show_comments, show_checks)."""
         if self._syncing_menu:
             return
         options = replace(self.scene.display_options, **changes)

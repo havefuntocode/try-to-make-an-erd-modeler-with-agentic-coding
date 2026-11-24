@@ -303,6 +303,7 @@ def _layout_to_dict(layout: Layout) -> dict[str, Any]:
             "types": layout.display.show_types,
             "indexes": layout.display.show_indexes,
             "comments": layout.display.show_comments,
+            "checks": layout.display.show_checks,
         },
         "databases": databases,
         "entities": [
@@ -357,6 +358,7 @@ def _display_from_dict(d: dict[str, Any]) -> DisplayOptions:
         show_types=bool(d.get("types", default.show_types)),
         show_indexes=bool(d.get("indexes", default.show_indexes)),
         show_comments=bool(d.get("comments", default.show_comments)),
+        show_checks=bool(d.get("checks", default.show_checks)),
     )
 
 
