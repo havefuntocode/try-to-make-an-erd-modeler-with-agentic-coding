@@ -324,6 +324,12 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
 - [x] Datei-Dialoge merken sich Orte (2026-11-28): letzter Ordner je Zweck (Diagramm öffnen/
       speichern, Export PDF/PNG/SVG, SQL-Skript), Datei → „Zuletzt geöffnet“ (8 Dateien,
       „Liste leeren“; nicht mehr vorhandene Dateien werden mit Hinweis entfernt)
+- [x] Notiz mit Tabelle verbinden, ohne vorher etwas zu markieren (2026-11-28): Kontextmenü
+      der Notiz → „Verbinden mit“ (alle Tabellen/Views der Ansicht, markierte zuerst,
+      aktuelle angehakt; doppelte Namen als `db.tabelle`), Kontextmenü der Tabelle →
+      „Notiz verbinden“ (Notizen mit ihrer ersten Zeile, „bisher: …“ bei anderer Verbindung)
+  - [ ] Vormerkung, vielleicht später: Notiz mit gedrückter Strg-Taste auf eine Tabelle
+        ziehen, um sie zu verbinden
 - [ ] Datenbank umbenennen (Doppelklick auf die Rahmen-Kopfzeile): Name in allen Verweisen
       nachziehen (Tabellenverweise, FKs, Positionen, Farben, Rahmen, Teildiagramme,
       Notiz-Verbindungen, Linien-Überschreibungen). Dialektwechsel bewusst nicht

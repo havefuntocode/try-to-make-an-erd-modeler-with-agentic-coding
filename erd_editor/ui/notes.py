@@ -103,16 +103,48 @@ class NotesMixin:
         item = self.scene.notes[note_id]
         menu = QMenu(self)
         menu.addAction("Notiz bearbeiten …").triggered.connect(lambda: self.edit_note(note_id))
-        refs = self.selected_refs()
+        menu.addSeparator()
+        self._add_connect_menu(menu, note_id, item.entity)
         if item.entity is not None:
             menu.addAction(f"Verbindung zu „{item.entity.table}“ lösen").triggered.connect(
                 lambda: self.detach_note(note_id))
-        if len(refs) == 1 and refs[0] != item.entity:
-            menu.addAction(f"Mit „{refs[0].table}“ verbinden").triggered.connect(
-                lambda: self.attach_note(note_id, refs[0]))
         menu.addSeparator()
         menu.addAction("Notiz löschen").triggered.connect(lambda: self.delete_notes([note_id]))
         return menu
+
+    def _add_connect_menu(self, menu: QMenu, note_id: str, current: TableRef | None) -> None:
+        """Untermenü „Verbinden mit“: alle Tabellen und Views der Ansicht, die markierte zuerst."""
+        sub = menu.addMenu("Verbinden mit")
+        refs = sorted(self.scene.entities, key=lambda r: (r.table.casefold(), r.key.casefold()))
+        if not refs:
+            sub.addAction("(keine Tabellen in dieser Ansicht)").setEnabled(False)
+            return
+        names = [r.table.casefold() for r in refs]
+        selected = self.selected_refs()
+        first = selected[0] if len(selected) == 1 and selected[0] in self.scene.entities else None
+
+        def add(ref: TableRef, prefix: str = "") -> None:
+            # gleicher Tabellenname in mehreren Datenbanken/Schemas → voller Name
+            label = ref.key if names.count(ref.table.casefold()) > 1 else ref.table
+            action = sub.addAction(prefix + label)
+            action.setCheckable(True)
+            action.setChecked(ref == current)
+            if ref != current:
+                action.triggered.connect(lambda _checked=False, r=ref: self.attach_note(note_id, r))
+            else:
+                action.triggered.connect(lambda _checked=False: action.setChecked(True))
+
+        if first is not None:
+            add(first, "Markiert: ")
+            sub.addSeparator()
+        for ref in refs:
+            add(ref)
+
+    @staticmethod
+    def note_label(text: str, limit: int = 40) -> str:
+        """Erste Zeile des Notiztexts, gekürzt – für Menüs."""
+        line = text.strip().splitlines()[0] if text.strip() else "(leer)"
+        return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
 
     def entity_menu(self, ref: TableRef, screen_pos) -> None:
         self.build_entity_menu(ref).exec(screen_pos)
@@ -122,11 +154,38 @@ class NotesMixin:
         noun = "View" if (t := self.document.diagram.find_table(ref)) is not None and t.is_view else "Tabelle"
         menu.addAction(f"{noun} bearbeiten …").triggered.connect(lambda: self.edit_table(ref))
         menu.addAction("Notiz anheften …").triggered.connect(lambda: self.add_note(entity=ref))
-        selected = self.selected_note_ids()
-        if len(selected) == 1:
-            menu.addAction("Markierte Notiz hiermit verbinden").triggered.connect(
-                lambda: self.attach_note(selected[0], ref))
+        self._add_note_menu(menu, ref)
         return menu
+
+    def _add_note_menu(self, menu: QMenu, ref: TableRef) -> None:
+        """Untermenü „Notiz verbinden“: vorhandene Notizen der Ansicht, die markierte zuerst."""
+        sub = menu.addMenu("Notiz verbinden")
+        notes = sorted(self.scene.notes.values(), key=lambda item: item.text.casefold())
+        if not notes:
+            sub.addAction("(keine Notizen in dieser Ansicht)").setEnabled(False)
+            return
+        selected = self.selected_note_ids()
+        first = selected[0] if len(selected) == 1 else None
+
+        def add(item, prefix: str = "") -> None:
+            label = self.note_label(item.text)
+            if item.entity is not None and item.entity != ref:
+                label += f"  (bisher: {item.entity.table})"
+            action = sub.addAction(prefix + label)
+            action.setToolTip(item.text)
+            action.setCheckable(True)
+            action.setChecked(item.entity == ref)
+            if item.entity != ref:
+                action.triggered.connect(lambda _checked=False, nid=item.id: self.attach_note(nid, ref))
+            else:
+                action.triggered.connect(lambda _checked=False: action.setChecked(True))
+
+        if first is not None:
+            add(self.scene.notes[first], "Markiert: ")
+            sub.addSeparator()
+        for item in notes:
+            add(item)
+        sub.setToolTipsVisible(True)
 
     def canvas_menu(self, scene_pos: QPointF, screen_pos) -> None:
         self.build_canvas_menu(scene_pos).exec(screen_pos)

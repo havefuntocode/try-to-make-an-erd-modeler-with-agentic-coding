@@ -232,7 +232,10 @@ def test_context_menus(window):
     window.scene.entities[lager("fach")].setSelected(True)
     note_actions = actions(window.build_note_menu(note_id))
     assert "Notiz bearbeiten …" in note_actions
-    note_actions["Mit „fach“ verbinden"].trigger()
+    assert not any("lösen" in text for text in note_actions)  # noch nicht verbunden
+    connect = actions(note_actions["Verbinden mit"].menu())
+    assert list(connect) == ["Markiert: fach", "fach", "regal"]
+    connect["Markiert: fach"].trigger()
     assert window.scene.notes[note_id].entity == lager("fach")
 
     window.texts.append("angeheftet")
@@ -243,6 +246,69 @@ def test_context_menus(window):
     actions(window.build_canvas_menu(QPointF(-500, -500)))["Notiz hier einfügen …"].trigger()
     here = next(n for n in window.scene.notes.values() if n.text == "hier")
     assert here.entity is None and here.pos() == QPointF(-500, -500)
+
+
+def menu_actions(menu):
+    return {a.text(): a for a in menu.actions() if a.text()}
+
+
+def test_connect_from_note_without_selection(window):
+    """Rechtsklick auf die Notiz reicht – keine Tabelle muss vorher markiert sein."""
+    note_id = window.add_note(text="n", use_selection=False)
+    window.scene.clearSelection()
+    connect = menu_actions(menu_actions(window.build_note_menu(note_id))["Verbinden mit"].menu())
+    assert list(connect) == ["fach", "regal"]
+    assert not any(a.isChecked() for a in connect.values())
+    connect["regal"].trigger()
+    assert window.scene.notes[note_id].entity == lager("regal")
+    assert window.undo_stack.text(window.undo_stack.index() - 1) == "Notiz mit „regal“ verbinden"
+
+    # danach: aktuelle Verbindung angehakt, erneutes Wählen ändert nichts
+    menu = menu_actions(window.build_note_menu(note_id))
+    assert "Verbindung zu „regal“ lösen" in menu
+    connect = menu_actions(menu["Verbinden mit"].menu())
+    assert connect["regal"].isChecked() and not connect["fach"].isChecked()
+    steps = window.undo_stack.count()
+    connect["regal"].trigger()
+    assert connect["regal"].isChecked() and window.undo_stack.count() == steps
+    connect["fach"].trigger()
+    assert window.scene.notes[note_id].entity == lager("fach")
+
+
+def test_connect_menu_full_names_for_duplicates(window):
+    window.create_database("archiv", Dialect.MYSQL)
+    window.create_table(TableRef("archiv", None, "fach"),
+                        Table("fach", [Column("id", "int", nullable=False)], [Index("PRIMARY", IndexKind.PRIMARY, ("id",))]))
+    note_id = window.add_note(text="n", use_selection=False)
+    connect = menu_actions(menu_actions(window.build_note_menu(note_id))["Verbinden mit"].menu())
+    assert list(connect) == ["archiv.fach", "lager.fach", "regal"]
+
+
+def test_connect_from_table_menu(window):
+    window.scene.clearSelection()
+    sub = menu_actions(window.build_entity_menu(lager("regal")))["Notiz verbinden"].menu()
+    assert [a.text() for a in sub.actions()] == ["(keine Notizen in dieser Ansicht)"]
+    assert not sub.actions()[0].isEnabled()
+
+    first = window.add_note(text="Zweite Zeile folgt\nmehr Text", use_selection=False)
+    second = window.add_note(entity=lager("fach"), text="an fach " + "x" * 60)
+    window.scene.clearSelection()
+    window.scene.notes[first].setSelected(True)
+    notes = menu_actions(menu_actions(window.build_entity_menu(lager("regal")))["Notiz verbinden"].menu())
+    labels = list(notes)
+    assert labels[0] == "Markiert: Zweite Zeile folgt"
+    assert labels[1].startswith("an fach xxx") and "…" in labels[1] and labels[1].endswith("(bisher: fach)")
+    assert labels[2] == "Zweite Zeile folgt"
+    notes[labels[1]].trigger()
+    assert window.scene.notes[second].entity == lager("regal")
+
+
+def test_connect_menu_empty_view(window):
+    window.add_subdiagram("Leer", [])
+    window.add_note(text="n", use_selection=False)
+    note_id = next(iter(window.scene.notes))
+    sub = menu_actions(window.build_note_menu(note_id))["Verbinden mit"].menu()
+    assert [a.text() for a in sub.actions()] == ["(keine Tabellen in dieser Ansicht)"]
 
 
 def test_save_and_open_keeps_notes(window, tmp_path):
