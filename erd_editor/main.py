@@ -39,6 +39,7 @@ from erd_editor.persistence import credentials
 from erd_editor.ui.commands import DocumentCommand, LayoutCommand
 from erd_editor.ui.modeling import ModelingMixin
 from erd_editor.ui.notes import NotesMixin
+from erd_editor.ui import recent
 from erd_editor.ui.toolbar import ToolbarMixin
 from erd_editor.ui.subdiagram_tabs import MAIN_VIEW_TITLE, SubdiagramTabsMixin
 from erd_editor.ui.connection_dialog import ConnectionDialog, default_adapter_factory, needs_password
@@ -149,6 +150,9 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         file_menu.addAction(self._named("read_database", self._action("&Datenbank einlesen …", self.open_connection_dialog, QKeySequence("Ctrl+D"))))
         file_menu.addSeparator()
         file_menu.addAction(self._named("open", self._action("Ö&ffnen …", self.open_dialog, QKeySequence.StandardKey.Open)))
+        self.recent_menu = file_menu.addMenu("&Zuletzt geöffnet")
+        self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
+        self._fill_recent_menu()
         file_menu.addAction(self._named("save", self._action("&Speichern", self.save, QKeySequence.StandardKey.Save)))
         file_menu.addAction(self._action("Speichern &unter …", self.save_as, QKeySequence("Ctrl+Shift+S")))
         file_menu.addSeparator()
@@ -607,12 +611,39 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         if path:
             self.open_file(path)
 
+    def _fill_recent_menu(self) -> None:
+        """Untermenü „Zuletzt geöffnet“ aus den Einstellungen neu aufbauen."""
+        menu = self.recent_menu
+        menu.clear()
+        files = recent.recent_files()
+        for number, path in enumerate(files, start=1):
+            prefix = f"&{number} " if number < 10 else ""
+            action = menu.addAction(f"{prefix}{path.name}  –  {path.parent}")
+            action.setToolTip(str(path))
+            action.triggered.connect(lambda _checked=False, p=path: self.open_recent(p))
+        if files:
+            menu.addSeparator()
+            menu.addAction("Liste &leeren").triggered.connect(recent.clear_recent_files)
+        else:
+            menu.addAction("(keine)").setEnabled(False)
+
+    def open_recent(self, path: Path) -> bool:
+        if not Path(path).is_file():
+            recent.remove_recent_file(path)
+            QMessageBox.warning(self, "Datei nicht gefunden",
+                                f"{path}\n\nDie Datei gibt es nicht mehr; sie wurde aus der Liste entfernt.")
+            return False
+        if not self._confirm_discard():
+            return False
+        return self.open_file(path)
+
     def open_file(self, path: str | Path) -> bool:
         try:
             document = load_document(path)
         except (OSError, DocumentError) as exc:
             QMessageBox.critical(self, "Öffnen fehlgeschlagen", f"{path}\n\n{exc}")
             return False
+        self._remember_diagram(path)
         self.path = Path(path)
         self.show_document(document, use_layout=True)
         self._update_title()
@@ -638,6 +669,7 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         except OSError as exc:
             QMessageBox.critical(self, "Speichern fehlgeschlagen", f"{path}\n\n{exc}")
             return False
+        self._remember_diagram(path)
         self.path = path
         self._update_title()
         self.undo_stack.setClean()
@@ -659,10 +691,10 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         return True
 
     def _export_path(self, suffix: str) -> Path:
-        """Vorschlag: Name der Diagrammdatei mit neuer Endung."""
-        if self.path:
-            return self.path.with_name(self.path.name.removesuffix(FILE_SUFFIX) + suffix)
-        return self._dialog_dir() / f"diagramm{suffix}"
+        """Vorschlag: Name der Diagrammdatei mit neuer Endung, im zuletzt benutzten Export-Ordner."""
+        stem = self.path.name.removesuffix(FILE_SUFFIX) if self.path else "diagramm"
+        folder = recent.last_dir(recent.EXPORT) or self._dialog_dir()
+        return folder / f"{stem}{suffix}"
 
     def print_dialog(self) -> None:
         if not self._has_content():
@@ -690,6 +722,7 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         except OSError as exc:
             QMessageBox.critical(self, "Export fehlgeschlagen", str(exc))
             return
+        recent.remember_dir(recent.EXPORT, path)
         self.statusBar().showMessage(f"PDF gespeichert: {path}")
 
     def export_png_dialog(self) -> None:
@@ -707,6 +740,7 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         except OSError as exc:
             QMessageBox.critical(self, "Export fehlgeschlagen", str(exc))
             return
+        recent.remember_dir(recent.EXPORT, path)
         self.statusBar().showMessage(f"PNG gespeichert ({size.width()} × {size.height()} Pixel): {path}")
 
     def export_svg_dialog(self) -> None:
@@ -722,10 +756,16 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         except OSError as exc:
             QMessageBox.critical(self, "Export fehlgeschlagen", str(exc))
             return
+        recent.remember_dir(recent.EXPORT, path)
         self.statusBar().showMessage(f"SVG gespeichert ({size.width()} × {size.height()}): {path}")
 
     def _dialog_dir(self) -> Path:
-        return self.path.parent if self.path else Path.cwd()
+        """Startordner für Öffnen/Speichern: zuletzt benutzter Diagramm-Ordner, sonst der der Datei."""
+        return recent.last_dir(recent.DIAGRAM) or (self.path.parent if self.path else Path.cwd())
+
+    def _remember_diagram(self, path: str | Path) -> None:
+        recent.remember_dir(recent.DIAGRAM, path)
+        recent.add_recent_file(path)
 
     def _confirm_discard(self) -> bool:
         """Bei ungespeicherten Änderungen nachfragen; True = weitermachen."""

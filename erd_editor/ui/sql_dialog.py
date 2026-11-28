@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from erd_editor.export.ddl import DIALECT_NAMES, DdlOptions, generate_script
 from erd_editor.model import Diagram
+from erd_editor.ui import recent
 
 
 class SqlExportDialog(QDialog):
@@ -120,7 +121,7 @@ class SqlExportDialog(QDialog):
     def suggested_path(self) -> Path:
         names = self.selected()
         stem = names[0] if len(names) == 1 else "schema"
-        return self._start_dir / f"{stem}.sql"
+        return (recent.last_dir(recent.SQL) or self._start_dir) / f"{stem}.sql"
 
     def save_dialog(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "SQL-Skript speichern", str(self.suggested_path()), "SQL (*.sql)")
@@ -132,3 +133,5 @@ class SqlExportDialog(QDialog):
             Path(path).write_text(self.script(), encoding="utf-8")
         except OSError as exc:
             QMessageBox.critical(self, "Speichern fehlgeschlagen", str(exc))
+            return
+        recent.remember_dir(recent.SQL, path)

@@ -321,6 +321,9 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
       `model/dialect`). Neue Tabelle/View/Beziehung sind nie ausgegraut: ohne Modell-Datenbank
       fragt das Programm, ob es eine anlegen soll, und macht danach direkt weiter.
       Tests: ungeplante modale Dialoge lassen einen Test scheitern statt hängen (`conftest.py`)
+- [x] Datei-Dialoge merken sich Orte (2026-11-28): letzter Ordner je Zweck (Diagramm öffnen/
+      speichern, Export PDF/PNG/SVG, SQL-Skript), Datei → „Zuletzt geöffnet“ (8 Dateien,
+      „Liste leeren“; nicht mehr vorhandene Dateien werden mit Hinweis entfernt)
 - [ ] Datenbank umbenennen (Doppelklick auf die Rahmen-Kopfzeile): Name in allen Verweisen
       nachziehen (Tabellenverweise, FKs, Positionen, Farben, Rahmen, Teildiagramme,
       Notiz-Verbindungen, Linien-Überschreibungen). Dialektwechsel bewusst nicht
@@ -420,6 +423,11 @@ wieder – so muss `erd_test_shop` nicht neu eingespielt werden.
   information/warning/critical` werfen im Test einen Fehler, statt modal zu warten. Tests,
   die einen Dialog brauchen, ersetzen `exec` der jeweiligen Dialogklasse bzw. die
   `QMessageBox`-Funktion selbst (Beispiel: `fake_database_dialog` in `tests/test_modeling.py`)
+- Gemerkte Orte (`ui/recent.py`): `last_dir(zweck)`/`remember_dir(zweck, datei)` mit den
+  Zwecken `DIAGRAM`, `EXPORT`, `SQL` (Schlüssel `files/dir_<zweck>`; ein nicht mehr
+  vorhandener Ordner gilt als nicht gemerkt), `recent_files()`/`add_recent_file()` für
+  `files/recent`. Gemerkt wird erst nach erfolgreichem Öffnen, Speichern oder Export.
+  QSettings liefert im INI-Format bei einem Eintrag einen String statt einer Liste
 - Datei → Neu öffnet `DatabaseDialog` mit Titel „Neues Diagramm“; Abbrechen ändert nichts.
   Ohne Modell-Datenbank führen Neue Tabelle/View/Beziehung über `offer_new_database()`
 
