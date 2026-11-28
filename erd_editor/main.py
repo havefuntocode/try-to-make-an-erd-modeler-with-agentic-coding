@@ -185,7 +185,7 @@ class MainWindow(ModelingMixin, NotesMixin, ToolbarMixin, SubdiagramTabsMixin, Q
         layout_menu.addAction(self._named("auto_layout", self._action("&Automatisch anordnen", self._auto_layout, QKeySequence("Ctrl+L"))))
         layout_menu.addAction(self._action("&Rahmen an Inhalt anpassen", self.fit_frames))
 
-        model_menu = self.menuBar().addMenu("&Modell")
+        model_menu = self.menuBar().addMenu("&Modell bearbeiten")
         model_menu.addAction(self._named("new_database", self._action("Neue &Datenbank …", self.new_database_dialog)))
         model_menu.addAction(self._named("new_table", self._action("Neue &Tabelle …", self.new_table_dialog, QKeySequence("Ctrl+Shift+N"))))
         model_menu.addAction(self._named("new_view", self._action("Neue &View …", self.new_view_dialog, QKeySequence("Ctrl+Shift+V"))))

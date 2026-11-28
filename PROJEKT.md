@@ -254,7 +254,7 @@ Entitäten und Beziehungen selbst anlegen, ohne Datenbankverbindung.
 ### Später
 - [x] Views als eigene Objektart: einlesen (alle Dialekte, MariaDB über den SQL-Text),
       abgesetzte Box (gestrichelt, kursiv, „VIEW“), gepunktete Abhängigkeitslinien,
-      modellieren (Modell → Neue View …, Abhängigkeiten aus dem SQL erkannt),
+      modellieren (Modell bearbeiten → Neue View …, Abhängigkeiten aus dem SQL erkannt),
       SQL-Export in Abhängigkeitsreihenfolge; materialisierte Views noch nicht
 - [ ] UNIQUE-Constraints (Stand 2026-11-22: Einlesen in allen Dialekten, Indexbereich,
       1:1-Kardinalität, Tabelleneditor-Reiter „Indexe“, SQL-Export und Roundtrip waren

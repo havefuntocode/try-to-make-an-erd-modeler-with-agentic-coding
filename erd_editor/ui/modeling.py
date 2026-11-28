@@ -130,7 +130,7 @@ class ModelingMixin:
         self.undo_stack.clear()  # die erste Datenbank gehört zum neuen Diagramm, nicht rückgängig zu machen
         self._update_title()
         self.setWindowModified(False)
-        self.statusBar().showMessage("Neues Diagramm – Modell → Neue Tabelle … (Strg+Umschalt+N)")
+        self.statusBar().showMessage("Neues Diagramm – Modell bearbeiten → Neue Tabelle … (Strg+Umschalt+N)")
 
     # ------------------------------------------------------------------ Änderungen anwenden
 
@@ -182,7 +182,7 @@ class ModelingMixin:
     # ------------------------------------------------------------------ Datenbanken
 
     def new_database_dialog(self) -> bool:
-        """Modell → Neue Datenbank …; True, wenn eine angelegt wurde."""
+        """Modell bearbeiten → Neue Datenbank …; True, wenn eine angelegt wurde."""
         dialog = DatabaseDialog({db.name for db in self.document.diagram.databases}, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return False
@@ -267,7 +267,7 @@ class ModelingMixin:
         return [ref for ref, _ in self.document.diagram.tables() if ref.database == database]
 
     def new_view_dialog(self) -> None:
-        """Modell → Neue View …"""
+        """Modell bearbeiten → Neue View …"""
         target = self._choose_target("Eine neue View")
         if target is None:
             return
@@ -330,7 +330,7 @@ class ModelingMixin:
     # ------------------------------------------------------------------ Beziehungen
 
     def start_relation_tool(self) -> None:
-        """Modell → Beziehung zeichnen: von der Kind- zur Elterntabelle ziehen."""
+        """Modell bearbeiten → Beziehung zeichnen: von der Kind- zur Elterntabelle ziehen."""
         if not self.editable_targets():
             # Eine neue Datenbank ist leer – Beziehungen brauchen erst Tabellen
             if self.offer_new_database("Eine Beziehung"):
@@ -364,7 +364,7 @@ class ModelingMixin:
     # ------------------------------------------------------------------ SQL-Export
 
     def sql_export_dialog(self) -> None:
-        """Modell → SQL-Skript erzeugen … (vorausgewählt: Modell-Datenbanken, sonst alle)."""
+        """Modell bearbeiten → SQL-Skript erzeugen … (vorausgewählt: Modell-Datenbanken, sonst alle)."""
         from erd_editor.ui.sql_dialog import SqlExportDialog
 
         diagram = self.document.diagram
